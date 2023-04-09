@@ -1,6 +1,4 @@
 // Import necessary modules
-import { serve } from "https://deno.land/std@0.114.0/http/server.ts";
-import { acceptWebSocket, isWebSocketCloseEvent, isWebSocketPingEvent, WebSocket } from "https://deno.land/std@0.114.0/ws/mod.ts";
 import { parse } from "https://deno.land/std/flags/mod.ts";
 import { Application, Router, send } from "https://deno.land/x/oak/mod.ts";
 
@@ -29,27 +27,30 @@ if (args.help || args.h) {
 const port = args.port || args.p || 8080;
 
 async function handleWs(sock: WebSocket): Promise<void> {
-  console.log("WebSocket connection established");
-  try {
-    for await (const ev of sock) {
-      if (typeof ev === "string") {
-        // Handle text message from the client
-        console.log("Received message:", ev);
-      } else if (isWebSocketPingEvent(ev)) {
-        const [, body] = ev;
-        // Respond to WebSocket ping event
-        console.log("WebSocket ping:", body);
-      } else if (isWebSocketCloseEvent(ev)) {
-        // Handle WebSocket close event
-        const { code, reason } = ev;
-        console.log("WebSocket closed:", code, reason);
+  const errorHandled = <F extends (...args: any[]) => any>(fn: F): F => {
+    return ((...args: any[]) => {
+      try {
+        return fn(...args);
+      } catch (err) {
+        console.error(`Failed to handle WebSocket event: ${err}`);
       }
-    }
-  } catch (err) {
-    console.error(`Failed to handle WebSocket connection: ${err}`);
-  } finally {
-    await sock.close(1000).catch(console.error);
-  }
+    }) as F;
+  };
+
+  sock.onopen = errorHandled(() => {
+    console.log("WebSocket connection established");
+  });
+
+  sock.onmessage = errorHandled((ev) => {
+    // Handle text message from the client
+    console.log("Received message:", ev);
+  });
+
+  sock.onclose = (ev) => {
+    // Handle WebSocket close event
+    const { code, reason } = ev;
+    console.log("WebSocket closed:", code, reason);
+  };
 }
 
 console.log(`HTTP server is running on http://localhost:${port}/`);
@@ -58,17 +59,17 @@ const app = new Application();
 const router = new Router();
 
 router.get("/ws", async (ctx) => {
-  const { request } = ctx;
-  const { conn, r: bufReader, w: bufWriter, headers } = request as any;
-
-  const ws = await acceptWebSocket({
-    conn,
-    bufReader,
-    bufWriter,
-    headers,
-  });
-
-  await handleWs(ws);
+  try {
+    if (!ctx.isUpgradable) {
+      ctx.throw(501);
+    }
+    const socket = ctx.upgrade();
+    await handleWs(socket);
+  } catch (err) {
+    console.error(`Failed to upgrade websocket: ${err}`);
+    ctx.response.body = "Websocket request was not valid.";
+    ctx.response.status = 400;
+  }
 });
 
 app.use(async (ctx, next) => {

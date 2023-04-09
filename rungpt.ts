@@ -23,6 +23,8 @@ if (args.help || args.h) {
   Deno.exit(0);
 }
 
+const apiKey = await getApiKey();
+
 // Get the port number from the arguments or use the default value
 const port = args.port || args.p || 8080;
 
@@ -41,9 +43,16 @@ async function handleWs(sock: WebSocket): Promise<void> {
     console.log("WebSocket connection established");
   });
 
-  sock.onmessage = errorHandled((ev) => {
+  sock.onmessage = errorHandled(async (ev) => {
     // Handle text message from the client
     console.log("Received message:", ev);
+    try {
+      const chatGPTResponse = await sendMessageToChatGPT(apiKey, ev.data);
+      sock.send(chatGPTResponse);
+    } catch (err) {
+      console.error(`Failed to send message to ChatGPT: ${err}`);
+      sock.send(`Error: ${err.message}`);
+    }
   });
 
   sock.onclose = (ev) => {
@@ -89,3 +98,48 @@ app.use(router.routes());
 app.use(router.allowedMethods());
 
 await app.listen({ port: port });
+
+async function sendMessageToChatGPT(apiKey: string, message: string): Promise<string> {
+  const response = await fetch("https://api.openai.com/v1/engines/gpt-4/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      messages: [
+        { role: "system", content: "You are ChatGPT, a large language model trained by OpenAI, based on the GPT-4 architecture." },
+        { role: "user", content: message },
+      ],
+      max_tokens: 150,
+      n: 1,
+      stop: null,
+      temperature: 0.5,
+    }),
+  });
+
+  const data = await response.json();
+
+  if (response.ok) {
+    return data.choices[0].message.content.trim();
+  } else {
+    throw new Error(`Error in ChatGPT API: ${data.error.message}`);
+  }
+}
+
+async function getApiKey(): Promise<string> {
+  const apiKey = Deno.env.get("RUNGPT_API_KEY");
+
+  if (apiKey) {
+    return apiKey;
+  } else {
+    console.log("Please enter your OpenAI API key:");
+    const input = new TextEncoder().encode("RUNGPT_API_KEY=");
+    await Deno.stdout.write(input);
+    const apiKeyBuffer = new Uint8Array(64); // Assuming a 64-character long API key
+    await Deno.stdin.read(apiKeyBuffer);
+    const apiKeyString = new TextDecoder().decode(apiKeyBuffer).trim();
+    Deno.env.set("RUNGPT_API_KEY", apiKeyString);
+    return apiKeyString;
+  }
+}

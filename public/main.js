@@ -8,18 +8,30 @@ socket.onopen = (event) => {
   console.log("WebSocket connection established:", event);
 };
 
+function formatTime(date) {
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${hours}:${minutes}`;
+}
+
 socket.onmessage = (event) => {
   console.debug("WebSocket message received:", event);
 
   const messageData = JSON.parse(event.data);
   const { role, content } = messageData;
   const messageElement = document.createElement("div");
+  messageElement.classList.add("chat-message");
+  messageElement.classList.add(role === "user" ? "user-message" : "gpt-message");
 
-  if (role === "user") {
-    messageElement.textContent = `You: ${content}`;
-  } else {
-    messageElement.textContent = `GPT: ${content}`;
-  }
+  const timestampElement = document.createElement("span");
+  timestampElement.classList.add("timestamp");
+  timestampElement.textContent = formatTime(new Date());
+  messageElement.appendChild(timestampElement);
+
+  const contentElement = document.createElement("span");
+  contentElement.classList.add("content");
+  contentElement.textContent = role === "user" ? `You: ${content}` : `GPT: ${content}`;
+  messageElement.appendChild(contentElement);
 
   chatBox.appendChild(messageElement);
   chatBox.scrollTop = chatBox.scrollHeight;

@@ -49,7 +49,9 @@ async function handleWs(sock: WebSocket): Promise<void> {
     // Handle text message from the client
     console.log("Received message:", ev);
     try {
-      const chatGPTResponse = await sendMessageToChatGPT(chatGPT, ev.data);
+      const userMessage: Message = JSON.parse(ev.data);
+      sock.send(JSON.stringify(userMessage));
+      const chatGPTResponse = await sendMessageToChatGPT(chatGPT, userMessage.content);
       sock.send(JSON.stringify(chatGPTResponse));
     } catch (err) {
       console.error(`Failed to send message to ChatGPT: ${err}`);

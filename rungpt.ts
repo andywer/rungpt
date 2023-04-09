@@ -1,6 +1,7 @@
 // Import necessary modules
 import { parse } from "https://deno.land/std/flags/mod.ts";
 import { Application, Router, send } from "https://deno.land/x/oak/mod.ts";
+import { ChatGPT } from "./chat_gpt_api.ts";
 
 // Parse command line arguments
 const args = parse(Deno.args);
@@ -24,6 +25,7 @@ if (args.help || args.h) {
 }
 
 const apiKey = await getApiKey();
+const chatGPT = new ChatGPT(apiKey);
 
 // Get the port number from the arguments or use the default value
 const port = args.port || args.p || 8080;
@@ -47,7 +49,7 @@ async function handleWs(sock: WebSocket): Promise<void> {
     // Handle text message from the client
     console.log("Received message:", ev);
     try {
-      const chatGPTResponse = await sendMessageToChatGPT(apiKey, ev.data);
+      const chatGPTResponse = await sendMessageToChatGPT(chatGPT, ev.data);
       sock.send(chatGPTResponse);
     } catch (err) {
       console.error(`Failed to send message to ChatGPT: ${err}`);
@@ -99,31 +101,11 @@ app.use(router.allowedMethods());
 
 await app.listen({ port: port });
 
-async function sendMessageToChatGPT(apiKey: string, message: string): Promise<string> {
-  const response = await fetch("https://api.openai.com/v1/engines/gpt-4/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      messages: [
-        { role: "system", content: "You are ChatGPT, a large language model trained by OpenAI, based on the GPT-4 architecture." },
-        { role: "user", content: message },
-      ],
-      max_tokens: 150,
-      n: 1,
-      stop: null,
-      temperature: 0.5,
-    }),
-  });
-
-  const data = await response.json();
-
-  if (response.ok) {
-    return data.choices[0].message.content.trim();
-  } else {
-    throw new Error(`Error in ChatGPT API: ${data.error.message}`);
+async function sendMessageToChatGPT(chatGPT: ChatGPT, message: string): Promise<string> {
+  try {
+    return await chatGPT.sendMessage(message);
+  } catch (err) {
+    throw new Error(`Failed to send message to ChatGPT: ${err.message}`);
   }
 }
 

@@ -1,7 +1,7 @@
 // Import necessary modules
 import { parse } from "https://deno.land/std/flags/mod.ts";
 import { Application, Router, send } from "https://deno.land/x/oak/mod.ts";
-import { ChatGPT } from "./chat_gpt_api.ts";
+import { ChatGPT, Message } from "./chat_gpt_api.ts";
 
 // Parse command line arguments
 const args = parse(Deno.args);
@@ -50,10 +50,10 @@ async function handleWs(sock: WebSocket): Promise<void> {
     console.log("Received message:", ev);
     try {
       const chatGPTResponse = await sendMessageToChatGPT(chatGPT, ev.data);
-      sock.send(chatGPTResponse);
+      sock.send(JSON.stringify(chatGPTResponse));
     } catch (err) {
       console.error(`Failed to send message to ChatGPT: ${err}`);
-      sock.send(`Error: ${err.message}`);
+      sock.send(JSON.stringify({ error: err.message }));
     }
   });
 
@@ -101,7 +101,7 @@ app.use(router.allowedMethods());
 
 await app.listen({ port: port });
 
-async function sendMessageToChatGPT(chatGPT: ChatGPT, message: string): Promise<string> {
+async function sendMessageToChatGPT(chatGPT: ChatGPT, message: string): Promise<Message> {
   try {
     return await chatGPT.sendMessage(message);
   } catch (err) {
@@ -118,7 +118,7 @@ async function getApiKey(): Promise<string> {
     console.log("Please enter your OpenAI API key:");
     const input = new TextEncoder().encode("RUNGPT_API_KEY=");
     await Deno.stdout.write(input);
-    const apiKeyBuffer = new Uint8Array(64); // Assuming a 64-character long API key
+    const apiKeyBuffer = new Uint8Array(51); // Assuming a 51-character long API key
     await Deno.stdin.read(apiKeyBuffer);
     const apiKeyString = new TextDecoder().decode(apiKeyBuffer).trim();
     Deno.env.set("RUNGPT_API_KEY", apiKeyString);

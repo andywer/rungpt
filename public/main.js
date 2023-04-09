@@ -9,9 +9,18 @@ socket.onopen = (event) => {
 };
 
 socket.onmessage = (event) => {
-  const message = event.data;
+  console.debug("WebSocket message received:", event);
+
+  const messageData = JSON.parse(event.data);
+  const { role, content } = messageData;
   const messageElement = document.createElement("div");
-  messageElement.textContent = `GPT: ${message}`;
+
+  if (role === "user") {
+    messageElement.textContent = `You: ${content}`;
+  } else {
+    messageElement.textContent = `GPT: ${content}`;
+  }
+
   chatBox.appendChild(messageElement);
   chatBox.scrollTop = chatBox.scrollHeight;
 };
@@ -30,14 +39,9 @@ chatForm.addEventListener("submit", (event) => {
   if (message.length === 0) {
     return;
   }
-  // Send the message to the server
-  socket.send(message);
 
-  // Add the message to the chat box
-  const messageElement = document.createElement("div");
-  messageElement.textContent = `You: ${message}`;
-  chatBox.appendChild(messageElement);
-  chatBox.scrollTop = chatBox.scrollHeight;
+  // Send the message to the server
+  socket.send(JSON.stringify({ role: "user", content: message }));
 
   // Clear the input field
   inputMessage.value = "";

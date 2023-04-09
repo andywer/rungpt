@@ -2,6 +2,7 @@
 import { serve } from "https://deno.land/std@0.114.0/http/server.ts";
 import { acceptWebSocket, isWebSocketCloseEvent, isWebSocketPingEvent, WebSocket } from "https://deno.land/std@0.114.0/ws/mod.ts";
 import { parse } from "https://deno.land/std/flags/mod.ts";
+import { Application, Router, send } from "https://deno.land/x/oak/mod.ts";
 
 // Parse command line arguments
 const args = parse(Deno.args);
@@ -52,30 +53,38 @@ async function handleWs(sock: WebSocket): Promise<void> {
 }
 
 console.log(`HTTP server is running on http://localhost:${port}/`);
-const handler = async (req: Request): Promise<Response> => {
-  try {
-    const { url, headers } = req;
-    const upgrade = headers.get("upgrade");
 
-    if (upgrade && upgrade.toLowerCase() === "websocket") {
-      // Handle WebSocket connection
-      const { conn, r: bufReader, w: bufWriter } = req as any;
-      const ws = await acceptWebSocket({
-        conn,
-        bufReader,
-        bufWriter,
-        headers,
-      });
+const app = new Application();
+const router = new Router();
 
-      await handleWs(ws);
-      return new Response(null, { status: 101 });
-    } else {
-      // Handle other types of requests
-      return new Response("Not found", { status: 404 });
-    }
-  } catch (error) {
-    console.error("Error while handling request:", error);
-    return new Response("Internal Server Error", { status: 500 });
+router.get("/ws", async (ctx) => {
+  const { request } = ctx;
+  const { conn, r: bufReader, w: bufWriter, headers } = request as any;
+
+  const ws = await acceptWebSocket({
+    conn,
+    bufReader,
+    bufWriter,
+    headers,
+  });
+
+  await handleWs(ws);
+});
+
+app.use(async (ctx, next) => {
+  const { request, response } = ctx;
+  if (request.url.pathname.startsWith("/ws")) {
+    await next();
+  } else {
+    // Serve static assets
+    await send(ctx, request.url.pathname, {
+      root: `${Deno.cwd()}/public`,
+      index: "index.html",
+    });
   }
-};
-serve(handler, { addr: `:${port}` });
+});
+
+app.use(router.routes());
+app.use(router.allowedMethods());
+
+await app.listen({ port: port });

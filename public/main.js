@@ -2,22 +2,13 @@ const chatBox = document.getElementById("chat-box");
 const chatForm = document.getElementById("chat-form");
 const inputMessage = document.getElementById("input-message");
 
-const socket = new WebSocket("ws://localhost:8080/ws");
-
-socket.onopen = (event) => {
-  console.log("WebSocket connection established:", event);
-};
-
 function formatTime(date) {
   const hours = String(date.getHours()).padStart(2, '0');
   const minutes = String(date.getMinutes()).padStart(2, '0');
   return `${hours}:${minutes}`;
 }
 
-socket.onmessage = (event) => {
-  console.debug("WebSocket message received:", event);
-
-  const messageData = JSON.parse(event.data);
+async function renderMessage(messageData) {
   const { role, content } = messageData;
   const messageElement = document.createElement("div");
   messageElement.classList.add("chat-message");
@@ -30,20 +21,31 @@ socket.onmessage = (event) => {
 
   const contentElement = document.createElement("span");
   contentElement.classList.add("content");
-  contentElement.textContent = role === "user" ? `You: ${content}` : `GPT: ${content}`;
+  contentElement.innerHTML = "…";
   messageElement.appendChild(contentElement);
 
   chatBox.appendChild(messageElement);
   chatBox.scrollTop = chatBox.scrollHeight;
-};
 
-socket.onclose = (event) => {
-  console.log("WebSocket connection closed:", event);
-};
+  if (content instanceof ReadableStream) {
+    let read;
+    const decoder = new TextDecoder();
+    const reader = content.getReader();
+    contentElement.textContent = "";
 
-socket.onerror = (error) => {
-  console.log("WebSocket error:", error);
-};
+    while (!(read = await reader.read()).done) {
+      const chunk = decoder.decode(read.value);
+      const lines = chunk.split("\n").filter((line) => line.length > 0);
+      for (const line of lines) {
+        const data = JSON.parse(line.replace(/^data:\s*/, ""));
+        const { content } = data.choices[0].delta;
+        contentElement.textContent += content ?? "";
+      }
+    }
+  } else {
+    contentElement.textContent = content;
+  }
+}
 
 chatForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -52,11 +54,24 @@ chatForm.addEventListener("submit", (event) => {
     return;
   }
 
-  // Send the message to the server
-  socket.send(JSON.stringify({ role: "user", content: message }));
-
   // Clear the input field
   inputMessage.value = "";
+
+  (async () => {
+    // Render user message
+    await renderMessage({ role: "user", content: message });
+
+    // Send message to server
+    const response = await fetch("/api/chat", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ message }),
+    });
+
+    await renderMessage({ role: "gpt", content: response.body });
+  })().catch((error) => console.error(error));
 });
 
 inputMessage.addEventListener("input", (event) => {

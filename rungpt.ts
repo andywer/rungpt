@@ -36,7 +36,22 @@ if (args.help || args.h) {
 // Install plugin if flag is present
 if (args.install) {
   const [repo, version] = args.install.split("@");
-  await installPlugin(pluginsDir, repo, version);
+
+  if (!repo || !repo.match(/^[a-z0-9-]+\/[a-z0-9-]+$/i)) {
+    console.error("Invalid plugin repository format. Use the '<user>/<repo>@<version>' format.");
+    Deno.exit(1);
+  }
+  if (!version || !version.match(/^[a-z0-9\._-]+$/i)) {
+    console.error("Invalid plugin version format. Use the '<user>/<repo>@<version>' format.");
+    Deno.exit(1);
+  }
+
+  try {
+    const targetDir = await installPlugin(pluginsDir, repo, version);
+    console.log(`Plugin '${repo}'@${version} installed in '${targetDir}'`);
+  } catch (error) {
+    console.error(`Failed to install plugin '${repo}': ${error.message}`);
+  }
   Deno.exit(0);
 }
 

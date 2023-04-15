@@ -3,8 +3,8 @@ import { parse } from "https://deno.land/std/flags/mod.ts";
 import { Application, Router, send } from "https://deno.land/x/oak/mod.ts";
 import { ChatGPT } from "./chat_gpt_api.ts";
 
-// Parse command line arguments
-const args = parse(Deno.args);
+const appUrl = new URL(import.meta.url);
+const appPath = await Deno.realPath(new URL(".", appUrl).pathname);
 
 // Define help text
 const helpText = `
@@ -16,7 +16,14 @@ Usage:
 Options:
   --help, -h          Show this help message and exit.
   --port, -p <port>   Set the port number for the HTTP server to listen on (default: 8080).
+  --install, -i <user/repo>[@version]  Install a plugin from a GitHub repository using the '<user>/<repo>' format and an optional version.
 `;
+
+// Parse command line arguments
+const args = parse(Deno.args, {
+  alias: { help: "h", port: "p", install: "i" },
+  string: ["install"],
+});
 
 // Check if help flag is present
 if (args.help || args.h) {
@@ -24,11 +31,18 @@ if (args.help || args.h) {
   Deno.exit(0);
 }
 
+// Install plugin if flag is present
+if (args.install) {
+  const [repo, version] = args.install.split("@");
+  await installPlugin(repo, version);
+  Deno.exit(0);
+}
+
 const apiKey = await getApiKey();
 const chatGPT = new ChatGPT(apiKey);
 
 // Get the port number from the arguments or use the default value
-const port = args.port || args.p || 8080;
+const port = (args.port || args.p || 8080) as number;
 
 console.log(`HTTP server is running on http://localhost:${port}/`);
 
@@ -85,5 +99,24 @@ async function getApiKey(): Promise<string> {
     const apiKeyString = new TextDecoder().decode(apiKeyBuffer).trim();
     Deno.env.set("RUNGPT_API_KEY", apiKeyString);
     return apiKeyString;
+  }
+}
+
+async function installPlugin(repo: string, version?: string): Promise<void> {
+  const [user, repoName] = repo.split("/");
+  const versionString = version ? `#${version}` : "";
+  const installUrl = `https://github.com/${user}/${repoName}.git${versionString}`;
+
+  const pluginsDir = `${appPath}/plugins`;
+  const targetDir = `${pluginsDir}/${user}_${repoName}${version ? `_${version}` : ""}`;
+
+  try {
+    await Deno.mkdir(pluginsDir, { recursive: true });
+    await Deno.run({
+      cmd: ["git", "clone", "--depth", "1", installUrl, targetDir],
+    }).status();
+    console.log(`Plugin '${repo}'${version ? `@${version}` : ""} installed in '${targetDir}'`);
+  } catch (error) {
+    console.error(`Failed to install plugin '${repo}': ${error.message}`);
   }
 }

@@ -1,10 +1,12 @@
 // Import necessary modules
-import { parse } from "https://deno.land/std/flags/mod.ts";
-import { Application, Router, send } from "https://deno.land/x/oak/mod.ts";
-import { ChatGPT } from "./chat_gpt_api.ts";
+import { parse } from "https://deno.land/std@0.182.0/flags/mod.ts";
+import { Application, Router, send } from "https://deno.land/x/oak@v12.1.0/mod.ts";
+import { ChatGPT } from "./lib/chat_gpt_api.ts";
+import { installPlugin } from "./lib/plugins.ts";
 
 const appUrl = new URL(import.meta.url);
 const appPath = await Deno.realPath(new URL(".", appUrl).pathname);
+const pluginsDir = `${appPath}/plugins`;
 
 // Define help text
 const helpText = `
@@ -34,7 +36,7 @@ if (args.help || args.h) {
 // Install plugin if flag is present
 if (args.install) {
   const [repo, version] = args.install.split("@");
-  await installPlugin(repo, version);
+  await installPlugin(pluginsDir, repo, version);
   Deno.exit(0);
 }
 
@@ -67,7 +69,7 @@ router.post("/api/chat", async (ctx) => {
 });
 
 app.use(async (ctx, next) => {
-  const { request, response } = ctx;
+  const { request } = ctx;
   if (request.url.pathname === "/" || request.url.pathname.match(/\w+\.\w+$/)) {
     // Serve static assets
     await send(ctx, request.url.pathname, {
@@ -99,24 +101,5 @@ async function getApiKey(): Promise<string> {
     const apiKeyString = new TextDecoder().decode(apiKeyBuffer).trim();
     Deno.env.set("RUNGPT_API_KEY", apiKeyString);
     return apiKeyString;
-  }
-}
-
-async function installPlugin(repo: string, version?: string): Promise<void> {
-  const [user, repoName] = repo.split("/");
-  const versionString = version ? `#${version}` : "";
-  const installUrl = `https://github.com/${user}/${repoName}.git${versionString}`;
-
-  const pluginsDir = `${appPath}/plugins`;
-  const targetDir = `${pluginsDir}/${user}_${repoName}${version ? `_${version}` : ""}`;
-
-  try {
-    await Deno.mkdir(pluginsDir, { recursive: true });
-    await Deno.run({
-      cmd: ["git", "clone", "--depth", "1", installUrl, targetDir],
-    }).status();
-    console.log(`Plugin '${repo}'${version ? `@${version}` : ""} installed in '${targetDir}'`);
-  } catch (error) {
-    console.error(`Failed to install plugin '${repo}': ${error.message}`);
   }
 }

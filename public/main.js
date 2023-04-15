@@ -35,7 +35,7 @@ async function renderMessage(messageData) {
 
     while (!(read = await reader.read()).done) {
       const chunk = decoder.decode(read.value);
-      const lines = chunk.split("\n").filter((line) => line.length > 0);
+      const lines = chunk.split("\n").filter((line) => line.startsWith("data:"));
       for (const line of lines) {
         const data = JSON.parse(line.replace(/^data:\s*/, ""));
         const { content } = data.choices[0].delta;

@@ -126,6 +126,9 @@ stories:
     title: "Docker container management"
     description: "Implement a system for managing Docker containers associated with installed actions, including container creation, execution, and cleanup."
   - id: 20
+    title: "Create actions docker image"
+    description: "Create dockerfile and minimal web service for invoking and listing actions, including their metadata."
+  - id: 21
     title: "Setup script or system package requirements"
     description: "Develop a mechanism for handling setup scripts or system package requirements specified in the action metadata, ensuring the necessary dependencies are installed in the Docker container."
 ```
@@ -135,13 +138,13 @@ epic: 5
 title: "Action invocation"
 description: "Implement the mechanism to invoke an action when a special action-specific tag is included in GPT's output."
 stories:
-  - id: 21
+  - id: 22
     title: "Action-specific tag parsing"
     description: "Develop a system for detecting and parsing action-specific tags in GPT's output, extracting the relevant action information."
-  - id: 22
+  - id: 23
     title: "Action execution in Docker container"
     description: "Implement a mechanism for executing the specified action's script in the appropriate Docker container based on the parsed action-specific tag."
-  - id: 23
+  - id: 24
     title: "Handling action output"
     description: "Develop a process for handling the (potentially asynchronous) output returned by a Docker container executing an action and forwarding it to GPT in a new message."
 ```
@@ -151,13 +154,13 @@ epic: 6
 title: "Built-in actions for rungpt"
 description: "Develop a set of built-in actions that can be used by the GPT LLM to augment its capabilities, covering filesystem, web, and system actions."
 stories:
-  - id: 24
+  - id: 25
     title: "Filesystem actions"
     description: "Implement built-in actions for filesystem access, such as reading and writing files, reading directories, and managing files and directories."
-  - id: 25
+  - id: 26
     title: "Web actions"
     description: "Create built-in actions for web-related tasks, such as browsing web pages, performing Google queries, and interacting with web services and APIs."
-  - id: 26
+  - id: 27
     title: "System actions"
     description: "Develop built-in actions for system-related tasks, such as executing shell commands, retrieving system information, and getting the current time and date."
 ```
@@ -167,16 +170,16 @@ epic: 8
 title: "Documentation and examples"
 description: "Create comprehensive documentation and example actions to demonstrate the functionality and usage of rungpt."
 stories:
-  - id: 27
+  - id: 28
     title: "User guide and API documentation"
     description: "Write a user guide covering the installation and usage of rungpt, along with detailed API documentation for action development."
-  - id: 28
+  - id: 29
     title: "Example action: Text-to-speech"
     description: "Create an example action that converts text to speech using a third-party API, demonstrating how the GPT LLM can use actions to augment its capabilities with real-time text-to-speech functionality."
-  - id: 29
+  - id: 30
     title: "Example action: Text-to-image"
     description: "Develop an example action that generates an image based on a textual description, showcasing how the GPT LLM can use actions to create visual representations of text descriptions."
-  - id: 30
+  - id: 31
     title: "Tutorials and best practices"
     description: "Write tutorials on creating custom actions for rungpt and provide best practices for action development, testing, and deployment."
 ```

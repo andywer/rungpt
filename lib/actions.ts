@@ -1,11 +1,10 @@
-interface ActionMetadata {
+export interface ActionMetadata {
   schema_version: string;
   name_for_human: string;
   name_for_model: string;
   description_for_human: string;
   description_for_model: string;
   logo_url: string;
-  docker_image: string;
 }
 
 export async function installAction(actionsDir: string, repo: string, version: string): Promise<string> {

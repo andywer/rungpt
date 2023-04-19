@@ -20,12 +20,46 @@ You will need to be able to perform the task stated by each story just by the in
 Mark the end of your full response with "--COMPLETE--". You can pause and ask for further information at any time.
 ```
 
+## Major updates
+
+### Docker containers for plugins
+
+```
+Here is our entire application development plan. Update it to reflect that plugins will not be implemented as wasm modules anymore, but we will rather think in easy-to-create actions as scripts executed in a docker container.
+
+New actions concept:
+
+* Run a docker container and message it to execute an action
+  * `/rungpt/actions/<namespace>/<action>/{manifest.json,run}`
+  * Run a slim web service that can list and invoke actions
+  * Add tool/script to install all actions' required packages
+* Actions can be implemented in Python, Node, Deno, … (just install the necessary packages)
+* GPT can freely manipulate the container without putting the host machine at risk
+* Can selectively share host directories with the container
+* Should be able to run additional docker containers that the actions container can access for more specific tasks
+
+Development plan:
+
+<complete initial development plan>
+```
+
+```
+Feel free to change epic 4, 5 and 6 and their stories, so the development plan makes sense again. Also, actions don't have required APIs, only a setup script or list of required system packages.
+
+The examples in epic 8 can also changed or replaced by better fitting ones.```
+
+```
+Rethink epic 6: It could now cover implementing built-in actions for rungpt, like filesystem actions (read file, write file, read directory, …), web actions (browse page, google query, …), system actions (execute shell command, get time and date, …).
+
+The examples in epic 8 don't seem ideal. Actions are intended to be used by the GPT LLM itself to augment its capabilities. A text-to-speech or text-to-image action would make a lot more sense.
+```
+
 ## Development Plan
 
 ```yaml
 epic: 1
 title: "Develop the rungpt Deno application"
-description: "Create a Deno application called 'rungpt' that is a CLI program running a local HTTP server, serving a web app that offers an alternative user interface to use ChatGPT via the OpenAI API. The application should support installing and using plugins. A plugin is essentially a GitHub repository containing a metadata file and a web assembly module. Each plugin describes parameterized actions that it provides to GPT. GPT can include a snippet marked with a special action-specific tag to invoke the plugin action. Once rungpt receives output from GPT including such action snippets, it invokes the wasm module of the plugin that provides the action according to the plugin metadata. The (potentially asynchronous) output returned by the wasm module is then sent back to GPT in a new message."
+description: "Create a Deno application called 'rungpt' that is a CLI program running a local HTTP server, serving a web app that offers an alternative user interface to use ChatGPT via the OpenAI API. The application should support installing and using actions. An action is essentially a GitHub repository containing a metadata file and a script that runs in a Docker container. Each action describes parameterized tasks that it provides to GPT. GPT can include a snippet marked with a special action-specific tag to invoke the action. Once rungpt receives output from GPT including such action snippets, it runs the Docker container and executes the script of the action according to the action metadata. The (potentially asynchronous) output returned by the Docker container is then sent back to GPT in a new message."
 epics:
   - id: 2
   - id: 3
@@ -35,9 +69,8 @@ epics:
   - id: 8
 stories:
   - id: 7
-  - title: "System messages for available actions"
-  - description: "Implement a mechanism to automatically send system messages to GPT at the beginning of each new chat session. These messages should inform GPT about the available plugin actions, their parameters, and any constraints. The information should be gathered by parsing the metadata of all installed plugins and constructing a system message that represents the actions and their usage."
-
+    title: "System messages for available actions"
+    description: "Implement a mechanism to automatically send system messages to GPT at the beginning of each new chat session. These messages should inform GPT about the available actions, their parameters, and any constraints. The information should be gathered by parsing the metadata of all installed actions and constructing a system message that represents the actions and their usage."
 ```
 
 ```yaml
@@ -80,73 +113,70 @@ stories:
 
 ```yaml
 epic: 4
-title: "Plugin system infrastructure"
-description: "Design and implement the infrastructure for installing and using plugins, including the support for metadata and wasm modules. Plugins are specified as '<user>/<repo>' and optionally a version, and installation means cloning the repository to the local filesystem."
+title: "Action system infrastructure"
+description: "Design and implement the infrastructure for installing and using actions, including the support for metadata and Docker containers. Actions are specified as '<user>/<repo>' and optionally a version, and installation means cloning the repository to the local filesystem."
 stories:
   - id: 17
-    title: "Plugin installation process"
-    description: "Implement a process for installing plugins from GitHub repositories using the '<user>/<repo>' format and an optional version. Cloning the repository to the local filesystem is the installation process."
+    title: "Action installation process"
+    description: "Implement a process for installing actions from GitHub repositories using the '<user>/<repo>' format and an optional version. Cloning the repository to the local filesystem is the installation process."
   - id: 18
-    title: "Plugin metadata retrieval and validation"
-    description: "Create a system for retrieving the plugin metadata from the cloned GitHub repositories and validating its format and contents."
+    title: "Action metadata retrieval and validation"
+    description: "Create a system for retrieving the action metadata from the cloned GitHub repositories and validating its format and contents."
   - id: 19
-    title: "Wasm module loading and management"
-    description: "Implement a system for loading and managing wasm modules from the cloned GitHub repositories associated with installed plugins."
+    title: "Docker container management"
+    description: "Implement a system for managing Docker containers associated with installed actions, including container creation, execution, and cleanup."
   - id: 20
-    title: "Plugin API registration and access"
-    description: "Develop a mechanism for registering and accessing the APIs required by plugins, as specified in the plugin metadata."
+    title: "Setup script or system package requirements"
+    description: "Develop a mechanism for handling setup scripts or system package requirements specified in the action metadata, ensuring the necessary dependencies are installed in the Docker container."
 ```
 
 ```yaml
 epic: 5
-title: "Plugin action invocation"
-description: "Implement the mechanism to invoke a plugin's action when a special action-specific tag is included in GPT's output."
+title: "Action invocation"
+description: "Implement the mechanism to invoke an action when a special action-specific tag is included in GPT's output."
 stories:
   - id: 21
     title: "Action-specific tag parsing"
-    description: "Develop a system for detecting and parsing action-specific tags in GPT's output, extracting the relevant plugin and action information."
+    description: "Develop a system for detecting and parsing action-specific tags in GPT's output, extracting the relevant action information."
   - id: 22
-    title: "Plugin action execution"
-    description: "Implement a mechanism for executing the specified action from the appropriate plugin's wasm module based on the parsed action-specific tag."
+    title: "Action execution in Docker container"
+    description: "Implement a mechanism for executing the specified action's script in the appropriate Docker container based on the parsed action-specific tag."
   - id: 23
     title: "Handling action output"
-    description: "Develop a process for handling the (potentially asynchronous) output returned by a plugin action's wasm module and forwarding it to GPT in a new message."
+    description: "Develop a process for handling the (potentially asynchronous) output returned by a Docker container executing an action and forwarding it to GPT in a new message."
 ```
 
 ```yaml
 epic: 6
-title: "Built-in APIs for plugins"
-description: "Develop a set of built-in APIs that can be used by plugins, such as filesystem access."
+title: "Built-in actions for rungpt"
+description: "Develop a set of built-in actions that can be used by the GPT LLM to augment its capabilities, covering filesystem, web, and system actions."
 stories:
   - id: 24
-    title: "Filesystem access API"
-    description: "Implement a built-in API for providing filesystem access to plugins, including operations like reading and writing files."
+    title: "Filesystem actions"
+    description: "Implement built-in actions for filesystem access, such as reading and writing files, reading directories, and managing files and directories."
   - id: 25
-    title: "Networking API"
-    description: "Create a built-in API for networking operations, allowing plugins to perform HTTP requests and other network-related tasks."
+    title: "Web actions"
+    description: "Create built-in actions for web-related tasks, such as browsing web pages, performing Google queries, and interacting with web services and APIs."
   - id: 26
-    title: "Plugin configuration API"
-    description: "Develop a built-in API to handle plugin-specific configuration, such as reading and writing plugin configuration files."
-  - id: 27
-    title: "API registration and management"
-    description: "Implement a system for registering and managing built-in APIs, allowing plugins to declare the APIs they require and access them at runtime."
+    title: "System actions"
+    description: "Develop built-in actions for system-related tasks, such as executing shell commands, retrieving system information, and getting the current time and date."
 ```
 
 ```yaml
 epic: 8
 title: "Documentation and examples"
-description: "Create comprehensive documentation and example plugins to demonstrate the functionality and usage of rungpt."
+description: "Create comprehensive documentation and example actions to demonstrate the functionality and usage of rungpt."
 stories:
-  - id: 28
+  - id: 27
     title: "User guide and API documentation"
-    description: "Write a user guide covering the installation and usage of rungpt, along with detailed API documentation for plugin development."
+    description: "Write a user guide covering the installation and usage of rungpt, along with detailed API documentation for action development."
+  - id: 28
+    title: "Example action: Text-to-speech"
+    description: "Create an example action that converts text to speech using a third-party API, demonstrating how the GPT LLM can use actions to augment its capabilities with real-time text-to-speech functionality."
   - id: 29
-    title: "Example plugin: Text transformation"
-    description: "Create an example plugin that performs text transformation, such as converting text to uppercase or lowercase, demonstrating the use of plugin actions and built-in APIs."
+    title: "Example action: Text-to-image"
+    description: "Develop an example action that generates an image based on a textual description, showcasing how the GPT LLM can use actions to create visual representations of text descriptions."
   - id: 30
-    title: "Example plugin: Weather information"
-    description: "Develop an example plugin that fetches weather information based on user input, showcasing the use of plugin actions and networking API."
-  - id: 31
     title: "Tutorials and best practices"
-    description: "Write tutorials on creating custom plugins for rungpt and provide best practices for plugin development, testing, and deployment."
+    description: "Write tutorials on creating custom actions for rungpt and provide best practices for action development, testing, and deployment."
 ```

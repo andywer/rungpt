@@ -2,11 +2,11 @@
 import { parse } from "https://deno.land/std@0.182.0/flags/mod.ts";
 import { Application, Router, send } from "https://deno.land/x/oak@v12.1.0/mod.ts";
 import { ChatGPT } from "./lib/chat_gpt_api.ts";
-import { installPlugin } from "./lib/plugins.ts";
+import { installAction } from "./lib/actions.ts";
 
 const appUrl = new URL(import.meta.url);
 const appPath = await Deno.realPath(new URL(".", appUrl).pathname);
-const pluginsDir = `${appPath}/plugins`;
+const actionsDir = `${appPath}/actions`;
 
 // Define help text
 const helpText = `
@@ -18,7 +18,7 @@ Usage:
 Options:
   --help, -h          Show this help message and exit.
   --port, -p <port>   Set the port number for the HTTP server to listen on (default: 8080).
-  --install, -i <user/repo>[@version]  Install a plugin from a GitHub repository using the '<user>/<repo>' format and an optional version.
+  --install, -i <user/repo>[@version]  Install an action from a GitHub repository using the '<user>/<repo>' format and an optional version.
 `;
 
 // Parse command line arguments
@@ -33,24 +33,24 @@ if (args.help || args.h) {
   Deno.exit(0);
 }
 
-// Install plugin if flag is present
+// Install action if flag is present
 if (args.install) {
   const [repo, version] = args.install.split("@");
 
   if (!repo || !repo.match(/^[a-z0-9-]+\/[a-z0-9-]+$/i)) {
-    console.error("Invalid plugin repository format. Use the '<user>/<repo>@<version>' format.");
+    console.error("Invalid action repository format. Use the '<user>/<repo>@<version>' format.");
     Deno.exit(1);
   }
   if (!version || !version.match(/^[a-z0-9\._-]+$/i)) {
-    console.error("Invalid plugin version format. Use the '<user>/<repo>@<version>' format.");
+    console.error("Invalid action version format. Use the '<user>/<repo>@<version>' format.");
     Deno.exit(1);
   }
 
   try {
-    const targetDir = await installPlugin(pluginsDir, repo, version);
-    console.log(`Plugin '${repo}'@${version} installed in '${targetDir}'`);
+    const targetDir = await installAction(actionsDir, repo, version);
+    console.log(`Action '${repo}'@${version} installed in '${targetDir}'`);
   } catch (error) {
-    console.error(`Failed to install plugin '${repo}': ${error.message}`);
+    console.error(`Failed to install action '${repo}': ${error.message}`);
   }
   Deno.exit(0);
 }

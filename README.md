@@ -4,17 +4,25 @@ Amplifying GPT's capabilities by giving it access to **locally executed plugins*
 
 Why? So you can control what GPT should have access to: Access to parts of the local filesystem, allow it to access the internet, give it a docker container to use.
 
-Imagine Auto-GPT, MemoryGPT, BabyAGI & co could all be plugins for RunGPT, too, providing their capabilities and more together under one common framework.
+🚧 **Under construction** 🚧
+
+The idea is for Auto-GPT, MemoryGPT, BabyAGI & co to be plugins for RunGPT, providing their capabilities and more together under one common framework.
+
+Since the chat I/O is augmented, you as a user can also use the same features, for example include file contents in your prompt:
+
+```
+Let's continue implementing the chat functionality. Here is what we have so far:
+
+{{ read_file("./lib/chat.ts") }}
+```
 
 Basically a locally run proxy to the OpenAI API with a plugin system and its own locally served chat UI.
-
-🚧 **Under construction**
 
 ## Development
 
 Planned and mostly coded by GPT-4 itself. Development progress is tracked here:
 
-👉 Development Tracking Issue #1
+👉 [Development Tracking Issue #1](https://github.com/andywer/rungpt/issues/1)
 
 Check out [development.md](./development.md) to see the current planning of the development as epics and stories and the prompts that created them.
 

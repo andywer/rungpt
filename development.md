@@ -114,7 +114,7 @@ stories:
 ```yaml
 epic: 4
 title: "Action system infrastructure"
-description: "Design and implement the infrastructure for installing and using actions, including the support for metadata and Docker containers. Actions are specified as '<user>/<repo>' and optionally a version, and installation means cloning the repository to the local filesystem."
+description: "Design and implement the infrastructure for installing and using actions, including the support for metadata. Actions are specified as '<user>/<repo>' and optionally a version, and installation means cloning the repository to the local filesystem. Actions are invoked via a minimalistic CLI tool run in a docker container that has the actions directory mounted."
 stories:
   - id: 17
     title: "Action installation process"
@@ -127,7 +127,7 @@ stories:
     description: "Implement a system for managing Docker containers associated with installed actions, including container creation, execution, and cleanup."
   - id: 20
     title: "Create actions docker image"
-    description: "Create dockerfile and minimal web service for invoking and listing actions, including their metadata."
+    description: "Create dockerfile and minimal CLI tool for invoking and listing actions, including their metadata."
   - id: 21
     title: "Setup script or system package requirements"
     description: "Develop a mechanism for handling setup scripts or system package requirements specified in the action metadata, ensuring the necessary dependencies are installed in the Docker container."
@@ -142,8 +142,8 @@ stories:
     title: "Action-specific tag parsing"
     description: "Develop a system for detecting and parsing action-specific tags in GPT's output, extracting the relevant action information."
   - id: 23
-    title: "Action execution in Docker container"
-    description: "Implement a mechanism for executing the specified action's script in the appropriate Docker container based on the parsed action-specific tag."
+    title: "Action execution in Docker container using CLI tool"
+    description: "Implement a mechanism for executing the specified action's script in the appropriate Docker container using the minimal CLI tool based on the parsed action-specific tag."
   - id: 24
     title: "Handling action output"
     description: "Develop a process for handling the (potentially asynchronous) output returned by a Docker container executing an action and forwarding it to GPT in a new message."

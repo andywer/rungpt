@@ -1,5 +1,6 @@
 import { JsonParseStream } from "https://deno.land/std@0.184.0/json/mod.ts";
-import { ChatRole, ErrorEvent, EventType, MessageAppendEvent } from "./rungpt_chat_api.ts";
+import { ChatRole, ErrorEvent, EventType } from "./rungpt_chat_api.ts";
+import { ChatHistory } from "./chat_history.ts";
 
 // Add a regular expression for detecting action-specific tags
 const ACTION_TAG_REGEX = /\{\{(\w+)\s*((?:\w+\s*=\s*[^,=\s]+(?:,\s*)?)*\w*\s*(?:\((?:[^{}()]|\([^{}()]*\))*\))?)\}\}/;
@@ -171,33 +172,23 @@ export function StreamCloser(closeString: string): TransformStream<string, strin
   });
 }
 
-export function DeltaMessageTransformer(messageIndex: number, role: ChatRole): TransformStream<DeltaMessage, MessageAppendEvent> {
+export function DeltaMessageTransformer(chatHistory: ChatHistory, messageIndex: number, role: ChatRole): TransformStream<DeltaMessage, ErrorEvent> {
   return new TransformStream({
-    transform(chunk: DeltaMessage, controller: TransformStreamDefaultController<MessageAppendEvent>) {
+    transform(chunk: DeltaMessage) {
       if (!chunk.choices[0].delta.content) return;
 
-      const event: MessageAppendEvent = {
-        type: EventType.MessageAppend,
-        data: {
-          append: chunk.choices[0].delta.content,
-          index: messageIndex,
-          role,
-        },
-      };
-      controller.enqueue(event);
+      chatHistory.appendToMessage(messageIndex, chunk.choices[0].delta.content);
     },
   });
 }
 
 export function ActionExecutionTransformer(
-  allocateMessageIndex: () => number,
+  chatHistory: ChatHistory,
   invokeAction: (action: ParsedActionTag, handleError: (error: Error) => void) => ReadableStream<string>,
   role: ChatRole = ChatRole.System,
-): TransformStream<ParsedActionTag, MessageAppendEvent | ErrorEvent> {
+): TransformStream<ParsedActionTag, ErrorEvent> {
   return new TransformStream({
-    async transform(action: ParsedActionTag, controller: TransformStreamDefaultController<MessageAppendEvent | ErrorEvent>) {
-      const messageIndex = allocateMessageIndex();
-
+    async transform(action: ParsedActionTag, controller: TransformStreamDefaultController<ErrorEvent>) {
       const handleError = (error: Error) => {
         console.error(error);
         controller.enqueue({
@@ -210,20 +201,16 @@ export function ActionExecutionTransformer(
 
       try {
         const actionOutput = invokeAction(action, handleError);
+        const messageIndex = chatHistory.addMessage({
+          content: "",
+          role,
+        });
 
         let read: ReadableStreamDefaultReadResult<string>;
         const reader = actionOutput.getReader();
 
         while (!(read = await reader.read()).done) {
-          const event: MessageAppendEvent = {
-            type: EventType.MessageAppend,
-            data: {
-              append: read.value,
-              index: messageIndex,
-              role,
-            },
-          };
-          controller.enqueue(event);
+          chatHistory.appendToMessage(messageIndex, read.value);
         }
       } catch (error) {
         handleError(error);

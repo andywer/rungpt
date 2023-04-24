@@ -2,10 +2,11 @@
 import "https://deno.land/std@0.184.0/dotenv/load.ts";
 import { parse } from "https://deno.land/std@0.184.0/flags/mod.ts";
 import { JsonStringifyStream } from "https://deno.land/std@0.184.0/json/mod.ts";
-import { mergeReadableStreams, readableStreamFromIterable } from "https://deno.land/std@0.184.0/streams/mod.ts";
+import { iterateReader, mergeReadableStreams, readableStreamFromIterable } from "https://deno.land/std@0.184.0/streams/mod.ts";
 import { Application, Router, send } from "https://deno.land/x/oak@v12.1.0/mod.ts";
 import { installAction } from "./lib/actions.ts";
 import { ChatGPT, ChatMessage } from "./lib/chat_gpt_api.ts";
+import { ChatHistory, applyChatEventToHistory } from "./lib/chat_history.ts";
 import { ActionContainer, createActionContainer, getExistingActionContainer } from "./lib/docker_manager.ts";
 import { ActionExecutionTransformer, ActionTagDecoder, ChatGPTSSEDecoder, DeltaMessageTransformer, ParsedActionTag, SSEEncoder } from "./lib/stream_transformers.ts";
 import { ChatEvent, ChatRole, ErrorEvent, EventType, MessageAppendEvent } from "./lib/rungpt_chat_api.ts";
@@ -74,16 +75,30 @@ console.log(`HTTP server is running on http://localhost:${port}/`);
 const app = new Application();
 const router = new Router();
 
+const chatHistory = new ChatHistory();
+
+router.get("/api/chat", (ctx) => {
+  ctx.response.body = chatHistory.getMessages();
+});
+
+router.get("/api/chat/events", (ctx) => {
+  const output = chatHistory.eventStream()
+    .pipeThrough(new JsonStringifyStream())
+    .pipeThrough(SSEEncoder());
+
+  ctx.response.status = 200;
+  ctx.response.headers.set("Cache-Control", "no-cache");
+  ctx.response.headers.set("Content-Type", "text/event-stream");
+  ctx.response.body = output;
+});
+
 router.post("/api/chat", async (ctx) => {
   const body = await ctx.request.body({ type: "json" }).value;
   const engine = body.engine as string ?? "gpt-3.5-turbo";
-  const messages = body.messages as ChatMessage[] ?? ctx.throw(400, "Missing body parameter: messages");
+  const message = body.message as ChatMessage ?? ctx.throw(400, "Missing body parameter: messages");
 
   let actionContainer: ActionContainer | undefined;
-  let nextMessageID = messages.length + 1;
   const inputActionErrors: ErrorEvent[] = [];
-  const inputActionMessages: MessageAppendEvent[] = [];
-  const allocateMessageIndex = () => nextMessageID++;
 
   const invokeAction = (action: ParsedActionTag, handleError: (error: Error) => void): ReadableStream<string> => {
     const decoder = new TextDecoder();
@@ -96,10 +111,8 @@ router.post("/api/chat", async (ctx) => {
             if (!stdout) {
               return;
             }
-            let read: ReadableStreamDefaultReadResult<Uint8Array>;
-            const reader = stdout.readable.getReader();
-            while (!(read = await reader.read()).done) {
-              controller.enqueue(decoder.decode(read.value));
+            for await (const stdoutChunk of iterateReader(stdout)) {
+              controller.enqueue(decoder.decode(stdoutChunk));
             }
           });
         } catch (error) {
@@ -113,45 +126,48 @@ router.post("/api/chat", async (ctx) => {
     return stream;
   };
 
-  if (messages.length > 0 && messages[messages.length - 1].role === ChatRole.User) {
+  // Add user message to chat history
+  chatHistory.addMessage(message);
+
+  if (message.role === ChatRole.User) {
     let read: ReadableStreamDefaultReadResult<ChatEvent>;
-    const inputActions = readableStreamFromIterable([messages[messages.length - 1].content])
+    const inputActions = readableStreamFromIterable([message.content])
       .pipeThrough(ActionTagDecoder())
-      .pipeThrough(ActionExecutionTransformer(allocateMessageIndex, invokeAction));
+      .pipeThrough(ActionExecutionTransformer(chatHistory, invokeAction));
 
     const reader = inputActions.getReader();
     while (!(read = await reader.read()).done) {
       const event = read.value;
       if (event.type === EventType.MessageAppend) {
-        if (messages[event.data.index - 1]) {
-          messages[event.data.index - 1].content += event.data.append;
-        } else {
-          messages[event.data.index - 1] = {
-            content: event.data.append,
-            role: event.data.role,
-          };
-        }
-        inputActionMessages.push(event);
+        applyChatEventToHistory(event, chatHistory);
       } else if (event.type === EventType.Error) {
         inputActionErrors.push(event);
       }
     }
   }
 
-  const gptResponse = await chatGPT.sendMessage(messages, engine);
+  const gptResponse = await chatGPT.sendMessage(chatHistory.getMessages(), engine);
 
   if (!gptResponse.body) {
     return ctx.throw(500, "Failed to get response body from ChatGPT API call");
   }
 
+  const responseMessageIndex = chatHistory.addMessage({ content: "", role: ChatRole.Assistant });
+
   const sseDecoder = ChatGPTSSEDecoder();
-  const actionExecutor = ActionExecutionTransformer(allocateMessageIndex, invokeAction);
-  const messageTransformer = DeltaMessageTransformer(allocateMessageIndex(), ChatRole.Assistant);
+  const actionExecutor = ActionExecutionTransformer(chatHistory, invokeAction);
+  const messageTransformer = DeltaMessageTransformer(chatHistory, responseMessageIndex, ChatRole.Assistant);
 
-  const messagesOut1 = sseDecoder.actions.pipeThrough(actionExecutor);
-  const messagesOut2 = sseDecoder.messages.pipeThrough(messageTransformer);
+  const responseActionErrors = sseDecoder.actions.pipeThrough(actionExecutor);
+  const deltaMsgErrors = sseDecoder.messages.pipeThrough(messageTransformer);
 
-  const output = mergeReadableStreams(readableStreamFromIterable(inputActionMessages), readableStreamFromIterable(inputActionErrors), messagesOut1, messagesOut2)
+  const errorEvents = mergeReadableStreams(
+    readableStreamFromIterable(inputActionErrors),
+    responseActionErrors,
+    deltaMsgErrors,
+  );
+
+  const output = errorEvents
     .pipeThrough(new JsonStringifyStream())
     .pipeThrough(SSEEncoder());
 

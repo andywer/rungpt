@@ -1,12 +1,20 @@
 // Import necessary modules
-import { parse } from "https://deno.land/std@0.182.0/flags/mod.ts";
+import "https://deno.land/std@0.184.0/dotenv/load.ts";
+import { parse } from "https://deno.land/std@0.184.0/flags/mod.ts";
+import { JsonStringifyStream } from "https://deno.land/std@0.184.0/json/mod.ts";
+import { mergeReadableStreams, readableStreamFromIterable } from "https://deno.land/std@0.184.0/streams/mod.ts";
 import { Application, Router, send } from "https://deno.land/x/oak@v12.1.0/mod.ts";
-import { ChatGPT } from "./lib/chat_gpt_api.ts";
 import { installAction } from "./lib/actions.ts";
+import { ChatGPT, ChatMessage } from "./lib/chat_gpt_api.ts";
+import { ActionContainer, createActionContainer, getExistingActionContainer } from "./lib/docker_manager.ts";
+import { ActionExecutionTransformer, ActionTagDecoder, ChatGPTSSEDecoder, DeltaMessageTransformer, ParsedActionTag, SSEEncoder } from "./lib/stream_transformers.ts";
+import { ChatEvent, ChatRole, ErrorEvent, EventType, MessageAppendEvent } from "./lib/rungpt_chat_api.ts";
 
 const appUrl = new URL(import.meta.url);
 const appPath = await Deno.realPath(new URL(".", appUrl).pathname);
 const actionsDir = `${appPath}/actions`;
+
+const dockerImageName = "rungpt_actions:latest";
 
 // Define help text
 const helpText = `
@@ -69,18 +77,90 @@ const router = new Router();
 router.post("/api/chat", async (ctx) => {
   const body = await ctx.request.body({ type: "json" }).value;
   const engine = body.engine as string ?? "gpt-3.5-turbo";
-  const message = body.message as string ?? ctx.throw(400, "Missing body parameter: message");
+  const messages = body.messages as ChatMessage[] ?? ctx.throw(400, "Missing body parameter: messages");
 
-  const gptResponse = await chatGPT.sendMessage(message, engine);
+  let actionContainer: ActionContainer | undefined;
+  let nextMessageID = messages.length + 1;
+  const inputActionErrors: ErrorEvent[] = [];
+  const inputActionMessages: MessageAppendEvent[] = [];
+  const allocateMessageIndex = () => nextMessageID++;
+
+  const invokeAction = (action: ParsedActionTag, handleError: (error: Error) => void): ReadableStream<string> => {
+    const decoder = new TextDecoder();
+    const stream = new ReadableStream<string>({
+      async start(controller) {
+        try {
+          actionContainer = actionContainer ?? await getExistingActionContainer() ?? await createActionContainer(dockerImageName, `${actionsDir}/installed`);
+          await actionContainer.actions.invokeAction(action.action, action.parameters, async (process) => {
+            const stdout = process.stdout;
+            if (!stdout) {
+              return;
+            }
+            let read: ReadableStreamDefaultReadResult<Uint8Array>;
+            const reader = stdout.readable.getReader();
+            while (!(read = await reader.read()).done) {
+              controller.enqueue(decoder.decode(read.value));
+            }
+          });
+        } catch (error) {
+          handleError(error);
+          controller.close();
+        } finally {
+          controller.close();
+        }
+      },
+    });
+    return stream;
+  };
+
+  if (messages.length > 0 && messages[messages.length - 1].role === ChatRole.User) {
+    let read: ReadableStreamDefaultReadResult<ChatEvent>;
+    const inputActions = readableStreamFromIterable([messages[messages.length - 1].content])
+      .pipeThrough(ActionTagDecoder())
+      .pipeThrough(ActionExecutionTransformer(allocateMessageIndex, invokeAction));
+
+    const reader = inputActions.getReader();
+    while (!(read = await reader.read()).done) {
+      const event = read.value;
+      if (event.type === EventType.MessageAppend) {
+        if (messages[event.data.index - 1]) {
+          messages[event.data.index - 1].content += event.data.append;
+        } else {
+          messages[event.data.index - 1] = {
+            content: event.data.append,
+            role: event.data.role,
+          };
+        }
+        inputActionMessages.push(event);
+      } else if (event.type === EventType.Error) {
+        inputActionErrors.push(event);
+      }
+    }
+  }
+
+  const gptResponse = await chatGPT.sendMessage(messages, engine);
 
   if (!gptResponse.body) {
     return ctx.throw(500, "Failed to get response body from ChatGPT API call");
   }
 
+  const sseDecoder = ChatGPTSSEDecoder();
+  const actionExecutor = ActionExecutionTransformer(allocateMessageIndex, invokeAction);
+  const messageTransformer = DeltaMessageTransformer(allocateMessageIndex(), ChatRole.Assistant);
+
+  const messagesOut1 = sseDecoder.actions.pipeThrough(actionExecutor);
+  const messagesOut2 = sseDecoder.messages.pipeThrough(messageTransformer);
+
+  const output = mergeReadableStreams(readableStreamFromIterable(inputActionMessages), readableStreamFromIterable(inputActionErrors), messagesOut1, messagesOut2)
+    .pipeThrough(new JsonStringifyStream())
+    .pipeThrough(SSEEncoder());
+
   ctx.response.status = 200;
   ctx.response.headers.set("Cache-Control", "no-cache");
-  ctx.response.headers.set("Content-Type", gptResponse.headers.get("Content-Type")!);
-  ctx.response.body = gptResponse.body;
+  ctx.response.headers.set("Content-Type", "text/event-stream");
+  ctx.response.body = output;
+
+  gptResponse.body.pipeTo(sseDecoder.ingress);
 });
 
 app.use(async (ctx, next) => {
@@ -103,18 +183,18 @@ app.use(router.allowedMethods());
 await app.listen({ port: port });
 
 async function getApiKey(): Promise<string> {
-  const apiKey = Deno.env.get("RUNGPT_API_KEY");
+  const apiKey = Deno.env.get("OPENAI_API_KEY");
 
   if (apiKey) {
     return apiKey;
   } else {
     console.log("Please enter your OpenAI API key:");
-    const input = new TextEncoder().encode("RUNGPT_API_KEY=");
+    const input = new TextEncoder().encode("OPENAI_API_KEY=");
     await Deno.stdout.write(input);
     const apiKeyBuffer = new Uint8Array(51); // Assuming a 51-character long API key
     await Deno.stdin.read(apiKeyBuffer);
     const apiKeyString = new TextDecoder().decode(apiKeyBuffer).trim();
-    Deno.env.set("RUNGPT_API_KEY", apiKeyString);
+    Deno.env.set("OPENAI_API_KEY", apiKeyString);
     return apiKeyString;
   }
 }

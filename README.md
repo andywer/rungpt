@@ -48,3 +48,10 @@ deno run --allow-net --allow-read --allow-write --allow-env --allow-run rungpt.t
 ```
 
 Visit `http://localhost:8080` in your browser to use the web app.
+
+## Development
+
+```sh
+make docker-build
+make test
+```

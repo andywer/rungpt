@@ -37,9 +37,18 @@ async function renderMessage(messageData) {
       const chunk = decoder.decode(read.value);
       const lines = chunk.split("\n").filter((line) => line.startsWith("data:"));
       for (const line of lines) {
-        const data = JSON.parse(line.replace(/^data:\s*/, ""));
-        const { content } = data.choices[0].delta;
-        contentElement.textContent += content ?? "";
+        const event = JSON.parse(line.replace(/^data:\s*/, ""));
+
+        if (event.type === "message/append") {
+          const { append, _index, role } = event.data;
+          if (role === "assistant") {
+            contentElement.textContent += append;
+          }
+        } else if (event.type === "error") {
+          console.error(event);
+        } else {
+          console.warn(`Unrecognized event:`, event);
+        }
       }
     }
   } else {
@@ -67,10 +76,15 @@ chatForm.addEventListener("submit", (event) => {
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({
+        messages: [{
+          content: message,
+          role: "user",
+        }],
+      }),
     });
 
-    await renderMessage({ role: "gpt", content: response.body });
+    await renderMessage({ role: "assistant", content: response.body });
   })().catch((error) => console.error(error));
 });
 

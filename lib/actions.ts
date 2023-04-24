@@ -47,7 +47,6 @@ function validateActionMetadata(metadata: any): metadata is ActionMetadata {
     description_for_human: "string",
     description_for_model: "string",
     logo_url: "string",
-    docker_image: "string",
   };
 
   for (const [property, type] of Object.entries(requiredProperties)) {
@@ -59,4 +58,22 @@ function validateActionMetadata(metadata: any): metadata is ActionMetadata {
   // Add additional validation checks here, if necessary
 
   return true;
+}
+
+export async function getInstalledActions(actionsDir: string): Promise<string[]> {
+  try {
+    const entries = Deno.readDir(actionsDir);
+    const actionDirs: string[] = [];
+
+    for await (const entry of entries) {
+      if (entry.isDirectory && !entry.name.startsWith(".")) {
+        const actionPath = `${actionsDir}/${entry.name}`;
+        actionDirs.push(actionPath);
+      }
+    }
+
+    return actionDirs;
+  } catch (error) {
+    throw new Error(`Failed to retrieve installed actions from '${actionsDir}': ${error.message}`);
+  }
 }

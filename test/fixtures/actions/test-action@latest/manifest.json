@@ -1,0 +1,8 @@
+{
+  "schema_version": "0.0.0",
+  "name_for_human": "Hello action",
+  "name_for_model": "hello",
+  "description_for_human": "Some random test action",
+  "description_for_model": "Some random test action",
+  "logo_url": "https://example.com/logo.png"
+}

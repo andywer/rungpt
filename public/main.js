@@ -2,7 +2,7 @@ const chatBox = document.getElementById("chat-box");
 const chatForm = document.getElementById("chat-form");
 const inputMessage = document.getElementById("input-message");
 
-let messages = [];
+const messages = [];
 
 function formatTime(date) {
   const hours = String(date.getHours()).padStart(2, '0');

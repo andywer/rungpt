@@ -60,20 +60,20 @@ function validateActionMetadata(metadata: any): metadata is ActionMetadata {
   return true;
 }
 
-export async function getInstalledActions(actionsDir: string): Promise<string[]> {
+export async function getInstalledActions(installedDir: string): Promise<string[]> {
   try {
-    const entries = Deno.readDir(actionsDir);
+    const entries = Deno.readDir(installedDir);
     const actionDirs: string[] = [];
 
     for await (const entry of entries) {
       if (entry.isDirectory && !entry.name.startsWith(".")) {
-        const actionPath = `${actionsDir}/${entry.name}`;
+        const actionPath = `${installedDir}/${entry.name}`;
         actionDirs.push(actionPath);
       }
     }
 
     return actionDirs;
   } catch (error) {
-    throw new Error(`Failed to retrieve installed actions from '${actionsDir}': ${error.message}`);
+    throw new Error(`Failed to retrieve installed actions from '${installedDir}': ${error.message}`);
   }
 }

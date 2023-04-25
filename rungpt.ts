@@ -4,12 +4,12 @@ import { parse } from "https://deno.land/std@0.184.0/flags/mod.ts";
 import { JsonStringifyStream } from "https://deno.land/std@0.184.0/json/mod.ts";
 import { iterateReader, mergeReadableStreams, readableStreamFromIterable } from "https://deno.land/std@0.184.0/streams/mod.ts";
 import { Application, Router, send } from "https://deno.land/x/oak@v12.1.0/mod.ts";
-import { installAction } from "./lib/actions.ts";
+import { ActionMetadata, getActionMetadata, getInstalledActions, installAction } from "./lib/actions.ts";
 import { ChatGPT, ChatMessage } from "./lib/chat_gpt_api.ts";
-import { ChatHistory, applyChatEventToHistory } from "./lib/chat_history.ts";
+import { AutoInitialMessages, InMemoryChatHistory, applyChatEventToHistory, eventStreamFromChatHistory } from "./lib/chat_history.ts";
 import { ActionContainer, createActionContainer, getExistingActionContainer } from "./lib/docker_manager.ts";
-import { ActionExecutionTransformer, ActionTagDecoder, ChatGPTSSEDecoder, DeltaMessageTransformer, ParsedActionTag, SSEEncoder } from "./lib/stream_transformers.ts";
-import { ChatEvent, ChatRole, ErrorEvent, EventType, MessageAppendEvent } from "./lib/rungpt_chat_api.ts";
+import { ActionExecutionTransformer, ActionTagDecoder, ChatGPTSSEDecoder, DeltaMessageTransformer, OnStreamEnd, ParsedActionTag, SSEEncoder } from "./lib/stream_transformers.ts";
+import { ChatEvent, ChatRole, ErrorEvent, EventType } from "./lib/rungpt_chat_api.ts";
 
 const appUrl = new URL(import.meta.url);
 const appPath = await Deno.realPath(new URL(".", appUrl).pathname);
@@ -75,14 +75,38 @@ console.log(`HTTP server is running on http://localhost:${port}/`);
 const app = new Application();
 const router = new Router();
 
-const chatHistory = new ChatHistory();
+const getActionManifests = async (actionsDir: string): Promise<ActionMetadata[]> => {
+  const manifests: ActionMetadata[] = [];
+  for (const actionDir of await getInstalledActions(actionsDir)) {
+    manifests.push(await getActionMetadata(actionDir));
+  }
+  return manifests;
+};
+
+const chatHistory = AutoInitialMessages(
+  new InMemoryChatHistory(),
+  [{
+    content: `
+Hello GPT-3.5! In this session, you have the ability to request data from external sources. When you need further data or require help with a task, include a data request in your reply text using \`{{action(<params>)}}\` to request the data. The outputs will be provided in subsequent system messages.
+
+Example:
+{{read_file("/tmp/test.txt")}}
+
+Available data requests:
+${(await getActionManifests(`${actionsDir}/installed`)).map((manifest) => `- ${manifest.description_for_model}`).join("\n")}
+
+Please use these data requests as needed to improve your responses and access information. Respond with a message including the data requests, then answer the original prompt after the data has been provided to you in additional messages.
+Assume that file paths reference files on the user's machine that you can request via \`read_file\`.    `.trim(),
+    role: ChatRole.System,
+  }],
+);
 
 router.get("/api/chat", (ctx) => {
   ctx.response.body = chatHistory.getMessages();
 });
 
 router.get("/api/chat/events", (ctx) => {
-  const output = chatHistory.eventStream()
+  const output = eventStreamFromChatHistory(chatHistory)
     .pipeThrough(new JsonStringifyStream())
     .pipeThrough(SSEEncoder());
 
@@ -92,13 +116,8 @@ router.get("/api/chat/events", (ctx) => {
   ctx.response.body = output;
 });
 
-router.post("/api/chat", async (ctx) => {
-  const body = await ctx.request.body({ type: "json" }).value;
-  const engine = body.engine as string ?? "gpt-3.5-turbo";
-  const message = body.message as ChatMessage ?? ctx.throw(400, "Missing body parameter: messages");
-
+async function submitChatMessages(messages: ChatMessage[], engine: string): Promise<ReadableStream<Uint8Array>> {
   let actionContainer: ActionContainer | undefined;
-  const inputActionErrors: ErrorEvent[] = [];
 
   const invokeAction = (action: ParsedActionTag, handleError: (error: Error) => void): ReadableStream<string> => {
     const decoder = new TextDecoder();
@@ -126,12 +145,12 @@ router.post("/api/chat", async (ctx) => {
     return stream;
   };
 
-  // Add user message to chat history
-  chatHistory.addMessage(message);
+  const inputActionErrors: ErrorEvent[] = [];
 
-  if (message.role === ChatRole.User) {
+  {
     let read: ReadableStreamDefaultReadResult<ChatEvent>;
-    const inputActions = readableStreamFromIterable([message.content])
+
+    const inputActions = readableStreamFromIterable(messages.map((msg) => msg.content))
       .pipeThrough(ActionTagDecoder())
       .pipeThrough(ActionExecutionTransformer(chatHistory, invokeAction));
 
@@ -149,17 +168,20 @@ router.post("/api/chat", async (ctx) => {
   const gptResponse = await chatGPT.sendMessage(chatHistory.getMessages(), engine);
 
   if (!gptResponse.body) {
-    return ctx.throw(500, "Failed to get response body from ChatGPT API call");
+    throw new Error("Failed to get response body from ChatGPT API call");
   }
 
   const responseMessageIndex = chatHistory.addMessage({ content: "", role: ChatRole.Assistant });
+  const totalMessageCountBefore = chatHistory.getMessages().length;
 
   const sseDecoder = ChatGPTSSEDecoder();
   const actionExecutor = ActionExecutionTransformer(chatHistory, invokeAction);
-  const messageTransformer = DeltaMessageTransformer(chatHistory, responseMessageIndex, ChatRole.Assistant);
+  const messageTransformer = DeltaMessageTransformer(chatHistory, responseMessageIndex);
 
   const responseActionErrors = sseDecoder.actions.pipeThrough(actionExecutor);
   const deltaMsgErrors = sseDecoder.messages.pipeThrough(messageTransformer);
+
+  gptResponse.body.pipeTo(sseDecoder.ingress);
 
   const errorEvents = mergeReadableStreams(
     readableStreamFromIterable(inputActionErrors),
@@ -169,14 +191,31 @@ router.post("/api/chat", async (ctx) => {
 
   const output = errorEvents
     .pipeThrough(new JsonStringifyStream())
-    .pipeThrough(SSEEncoder());
+    .pipeThrough(SSEEncoder())
+    .pipeThrough(OnStreamEnd(async () => {
+      if (chatHistory.getMessages().length > totalMessageCountBefore) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        return submitChatMessages(chatHistory.getMessages().slice(totalMessageCountBefore), engine);
+      } else {
+        return readableStreamFromIterable([]);
+      }
+    }));
+
+  return output;
+}
+
+router.post("/api/chat", async (ctx) => {
+  const body = await ctx.request.body({ type: "json" }).value;
+  const engine = body.engine as string ?? "gpt-3.5-turbo";
+  const message = body.message as ChatMessage ?? ctx.throw(400, "Missing body parameter: messages");
+
+  // Add user message to chat history
+  chatHistory.addMessage(message);
 
   ctx.response.status = 200;
   ctx.response.headers.set("Cache-Control", "no-cache");
   ctx.response.headers.set("Content-Type", "text/event-stream");
-  ctx.response.body = output;
-
-  gptResponse.body.pipeTo(sseDecoder.ingress);
+  ctx.response.body = await submitChatMessages([message], engine);
 });
 
 app.use(async (ctx, next) => {

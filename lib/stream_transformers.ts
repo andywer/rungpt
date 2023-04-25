@@ -172,7 +172,7 @@ export function StreamCloser(closeString: string): TransformStream<string, strin
   });
 }
 
-export function DeltaMessageTransformer(chatHistory: ChatHistory, messageIndex: number, role: ChatRole): TransformStream<DeltaMessage, ErrorEvent> {
+export function DeltaMessageTransformer(chatHistory: ChatHistory, messageIndex: number): TransformStream<DeltaMessage, ErrorEvent> {
   return new TransformStream({
     transform(chunk: DeltaMessage) {
       if (!chunk.choices[0].delta.content) return;
@@ -246,4 +246,17 @@ export function ChatGPTSSEDecoder(): ChatGPTSSETransformer {
     ingress: sseDecoder.writable,
     messages: messages2,
   };
+}
+
+export function OnStreamEnd<T>(callback: () => Promise<ReadableStream<T>> | ReadableStream<T>): TransformStream<T, T> {
+  return new TransformStream({
+    async flush(controller: TransformStreamDefaultController<T>) {
+      let read: ReadableStreamDefaultReadResult<T>;
+      const reader = (await callback()).getReader();
+
+      while (!(read = await reader.read()).done) {
+        controller.enqueue(read.value);
+      }
+    },
+  });
 }

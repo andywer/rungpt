@@ -87,16 +87,15 @@ const chatHistory = AutoInitialMessages(
   new InMemoryChatHistory(),
   [{
     content: `
-Hello GPT-3.5! In this session, you have the ability to request data from external sources. When you need further data or require help with a task, include a data request in your reply text using \`{{action(<params>)}}\` to request the data. The outputs will be provided in subsequent system messages.
+Hello GPT-3.5! You can request data from external sources in this session. Use \`{{action(<params>)}}\` to request data when you need further information or help with a task. The outputs will be in subsequent messages.
 
-Example:
-{{read_file("/tmp/test.txt")}}
+Example: \`{{read_file("/tmp/test.txt")}}\`
 
 Available data requests:
 ${(await getActionManifests(`${actionsDir}/installed`)).map((manifest) => `- ${manifest.description_for_model}`).join("\n")}
 
-Please use these data requests as needed to improve your responses and access information. Respond with a message including the data requests, then answer the original prompt after the data has been provided to you in additional messages.
-Assume that file paths reference files on the user's machine that you can request via \`read_file\`.    `.trim(),
+Use these data requests as needed to improve your responses and access information. Reply with the data requests, and then answer the prompt once the data is provided. File paths refer to files on the user's machine that you can request via \`read_file\`.
+`.trim(),
     role: ChatRole.System,
   }],
 );

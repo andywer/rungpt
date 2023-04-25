@@ -64,9 +64,11 @@ chatForm.addEventListener("submit", (event) => {
   })().catch((error) => console.error(error));
 });
 
-inputMessage.addEventListener("input", (event) => {
-  // Remove leading and trailing whitespace
-  event.target.value = event.target.value.trimStart().replace(/\s\s+/g, " ");
+inputMessage.addEventListener("keypress", (event) => {
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    chatForm.dispatchEvent(new Event("submit"));
+  }
 });
 
 function SSEDecoder() {

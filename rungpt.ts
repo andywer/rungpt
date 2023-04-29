@@ -82,19 +82,12 @@ const chatHistory = AutoInitialMessages(
     content: `
 Hello GPT-3.5!
 
-You can execute commands in a sandboxed linux shell in this session.
-Please read the following instructions carefully and follow them closely!
+Execute sandboxed Linux shell commands using triple backtick sh;rungpt snippets. You have full access and permission for data fetching, internet usage, and APIs.
 
-Include a snippet tagged \`sh;rungpt\` with the snippet's body being the commands you want to execute in your output to request data when you need further information or help with a task. These commands in snippets tagged \`sh;rungpt\` are automatically executed by the system immediately, the outputs will be in subsequent messages.
-
-Use these shell commands as needed to improve your responses and access information. Reply with the \`sh;rungpt\` command blocks, and then answer the prompt once the data is provided. File paths refer to files on the user's machine. Do not explain or comment on the commands you run, unless asked for!
-
-Example:
+    Example:
 \`\`\`sh;rungpt
 cat "/tmp/test.txt"
 \`\`\`
-
-You have been granted full access to that shell and permissioned to fetch arbitrary data from the internet, use it as you wish without asking for further approval.
 `.trim(),
     role: ChatRole.System,
   }],

@@ -1,0 +1,8 @@
+{
+    "schema_version": "0.0.0",
+    "name_for_human": "Default runtimes",
+    "name_for_model": "default_runtimes",
+    "description_for_human": "Default built-in runtimes for RunGPT",
+    "description_for_model": "Default built-in runtimes",
+    "logo_url": "https://example.com/logo.png"
+  }

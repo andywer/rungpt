@@ -39,6 +39,7 @@ export async function getActionMetadata(actionPath: string): Promise<ActionMetad
   }
 }
 
+// deno-lint-ignore no-explicit-any
 function validateActionMetadata(metadata: any): metadata is ActionMetadata {
   const requiredProperties: { [key: string]: string } = {
     schema_version: "string",
@@ -50,6 +51,7 @@ function validateActionMetadata(metadata: any): metadata is ActionMetadata {
   };
 
   for (const [property, type] of Object.entries(requiredProperties)) {
+    // deno-lint-ignore valid-typeof
     if (typeof metadata[property] !== type) {
       throw new Error(`Invalid metadata: '${property}' is missing or not a ${type}`);
     }

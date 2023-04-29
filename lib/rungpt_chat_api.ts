@@ -10,13 +10,6 @@ export enum EventType {
   MessageAppend = "message/append",
 }
 
-export interface ErrorEvent {
-  type: EventType.Error;
-  data: {
-    message: string;
-  };
-}
-
 export interface MessageAppendEvent {
   type: EventType.MessageAppend;
   data: {
@@ -25,5 +18,3 @@ export interface MessageAppendEvent {
     role: ChatRole;
   };
 }
-
-export type ChatEvent = ErrorEvent | MessageAppendEvent;

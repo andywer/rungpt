@@ -12,28 +12,11 @@ Deno.test("can instantiate an ActionContainer", withActionContainer((actionConta
 }));
 
 Deno.test("actions container is operational", withActionContainer(async (actionContainer, t) => {
-  await t.step("can list actions", async () => {
-    const actions = await actionContainer.actions.listActions();
-    assertEquals(actions, ["hello"]);
-  });
-
-  await t.step("can return action metadata", async () => {
-    const meta = await actionContainer.actions.actionMetadata("hello");
-    assertEquals(meta, {
-      schema_version: "0.0.0",
-      name_for_human: "Hello action",
-      name_for_model: "hello",
-      description_for_human: "Some random test action",
-      description_for_model: "Some random test action",
-      logo_url: "https://example.com/logo.png"
-    });
-  });
-
   await t.step("can invoke an action", async () => {
-    await actionContainer.actions.invokeAction("hello", {}, async (process) => {
+    await actionContainer.actions.invokeShell(`echo "Hello world!"`, async (process) => {
       const output = await process.output();
       const outputString = new TextDecoder().decode(output);
-      assertEquals(outputString, "Hello world from rungpt-actions!\n");
+      assertEquals(outputString, "Hello world!\n");
     });
   });
 }));

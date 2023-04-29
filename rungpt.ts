@@ -2,20 +2,19 @@
 import "https://deno.land/std@0.184.0/dotenv/load.ts";
 import { parse } from "https://deno.land/std@0.184.0/flags/mod.ts";
 import { JsonStringifyStream } from "https://deno.land/std@0.184.0/json/mod.ts";
-import { iterateReader, mergeReadableStreams, readableStreamFromIterable } from "https://deno.land/std@0.184.0/streams/mod.ts";
 import { Application, Router, send } from "https://deno.land/x/oak@v12.1.0/mod.ts";
-import { ActionMetadata, getActionMetadata, getInstalledActions, installAction } from "./lib/actions.ts";
-import { ChatGPT, ChatMessage } from "./lib/chat_gpt_api.ts";
-import { AutoInitialMessages, InMemoryChatHistory, applyChatEventToHistory, eventStreamFromChatHistory } from "./lib/chat_history.ts";
-import { ActionContainer, createActionContainer, getExistingActionContainer } from "./lib/docker_manager.ts";
-import { ActionExecutionTransformer, ActionTagDecoder, ChatGPTSSEDecoder, DeltaMessageTransformer, OnStreamEnd, ParsedActionTag, SSEEncoder } from "./lib/stream_transformers.ts";
-import { ChatEvent, ChatRole, ErrorEvent, EventType } from "./lib/rungpt_chat_api.ts";
+import { ChatMessage, PluginInstance } from "./plugins.d.ts";
+import { installAction } from "./lib/actions.ts";
+import { AutoInitialMessages, InMemoryChatHistory, eventStreamFromChatHistory } from "./lib/chat_history.ts";
+import { SSEEncoder } from "./lib/stream_transformers.ts";
+import { ChatRole } from "./lib/rungpt_chat_api.ts";
+import { AccessControlList, PluginContext, PluginSet } from "./lib/plugins.ts";
+import { PluginLoader } from "./lib/plugin_loader.ts";
+import { fail } from "https://deno.land/std@0.184.0/testing/asserts.ts";
 
 const appUrl = new URL(import.meta.url);
 const appPath = await Deno.realPath(new URL(".", appUrl).pathname);
-const actionsDir = `${appPath}/actions`;
-
-const dockerImageName = "rungpt_actions:latest";
+const pluginsDir = `${appPath}/plugins`;
 
 // Define help text
 const helpText = `
@@ -27,7 +26,7 @@ Usage:
 Options:
   --help, -h          Show this help message and exit.
   --port, -p <port>   Set the port number for the HTTP server to listen on (default: 8080).
-  --install, -i <user/repo>[@version]  Install an action from a GitHub repository using the '<user>/<repo>' format and an optional version.
+  --install, -i <user/repo>[@version]  Install a plugin from a GitHub repository using the '<user>/<repo>' format and an optional version.
 `;
 
 // Parse command line arguments
@@ -42,30 +41,74 @@ if (args.help || args.h) {
   Deno.exit(0);
 }
 
-// Install action if flag is present
+// Install plugin if flag is present
 if (args.install) {
   const [repo, version] = args.install.split("@");
 
   if (!repo || !repo.match(/^[a-z0-9-]+\/[a-z0-9-]+$/i)) {
-    console.error("Invalid action repository format. Use the '<user>/<repo>@<version>' format.");
+    console.error("Invalid plugin repository format. Use the '<user>/<repo>@<version>' format.");
     Deno.exit(1);
   }
   if (!version || !version.match(/^[a-z0-9\._-]+$/i)) {
-    console.error("Invalid action version format. Use the '<user>/<repo>@<version>' format.");
+    console.error("Invalid plugin version format. Use the '<user>/<repo>@<version>' format.");
     Deno.exit(1);
   }
 
   try {
-    const targetDir = await installAction(actionsDir, repo, version);
-    console.log(`Action '${repo}'@${version} installed in '${targetDir}'`);
+    const targetDir = await installAction(pluginsDir, repo, version);
+    console.log(`Plugin '${repo}'@${version} installed in '${targetDir}'`);
   } catch (error) {
-    console.error(`Failed to install action '${repo}': ${error.message}`);
+    console.error(`Failed to install plugin '${repo}': ${error.message}`);
   }
   Deno.exit(0);
 }
 
-const apiKey = await getApiKey();
-const chatGPT = new ChatGPT(apiKey);
+const loadAllPlugins = async (loader: PluginLoader): Promise<PluginInstance[]> => {
+  const plugins: PluginInstance[] = [];
+  for await (const plugin of loader.loadPlugins()) {
+    plugins.push(plugin);
+  }
+  return plugins;
+};
+
+const pluginLoader = new PluginLoader(pluginsDir);
+pluginLoader.events.on("plugin/discovered", (path) => console.debug(`Plugin discovered: ${path}`));
+pluginLoader.events.on("plugin/loaded", (plugin) => console.debug(`Plugin ${plugin.metadata.name_for_model} loaded.`));
+const enabledPlugins = new PluginSet(await loadAllPlugins(pluginLoader));
+
+const chatHistory = AutoInitialMessages(
+  new InMemoryChatHistory(),
+  [{
+    content: `
+Hello GPT-3.5!
+
+You can execute commands in a sandboxed linux shell in this session.
+Please read the following instructions carefully and follow them closely!
+
+Include a snippet tagged \`sh;rungpt\` with the snippet's body being the commands you want to execute in your output to request data when you need further information or help with a task. These commands in snippets tagged \`sh;rungpt\` are automatically executed by the system immediately, the outputs will be in subsequent messages.
+
+Use these shell commands as needed to improve your responses and access information. Reply with the \`sh;rungpt\` command blocks, and then answer the prompt once the data is provided. File paths refer to files on the user's machine. Do not explain or comment on the commands you run, unless asked for!
+
+Example:
+\`\`\`sh;rungpt
+cat "/tmp/test.txt"
+\`\`\`
+
+You have been granted full access to that shell and permissioned to fetch arbitrary data from the internet, use it as you wish without asking for further approval.
+`.trim(),
+    role: ChatRole.System,
+  }],
+);
+
+const acl: AccessControlList = [
+  { resource: ["filesystem", Deno.cwd()], permissions: ["read"] },
+  { resource: ["filesystem", "/etc/*"], permissions: ["read"] },
+];
+
+const pluginContext = new PluginContext(enabledPlugins, chatHistory, acl);
+await pluginContext.secrets.store("api.openai.com", await getApiKey());
+
+const runtime = pluginContext.enabledPlugins.runtimes.get("default") || fail("Default runtime not found");
 
 // Get the port number from the arguments or use the default value
 const port = (args.port || args.p || 8080) as number;
@@ -74,31 +117,6 @@ console.log(`HTTP server is running on http://localhost:${port}/`);
 
 const app = new Application();
 const router = new Router();
-
-const getActionManifests = async (actionsDir: string): Promise<ActionMetadata[]> => {
-  const manifests: ActionMetadata[] = [];
-  for (const actionDir of await getInstalledActions(actionsDir)) {
-    manifests.push(await getActionMetadata(actionDir));
-  }
-  return manifests;
-};
-
-const chatHistory = AutoInitialMessages(
-  new InMemoryChatHistory(),
-  [{
-    content: `
-Hello GPT-3.5! You can request data from external sources in this session. Use \`{{action(<params>)}}\` to request data when you need further information or help with a task. The outputs will be in subsequent messages.
-
-Example: \`{{read_file("/tmp/test.txt")}}\`
-
-Available data requests:
-${(await getActionManifests(`${actionsDir}/installed`)).map((manifest) => `- ${manifest.description_for_model}`).join("\n")}
-
-Use these data requests as needed to improve your responses and access information. Reply with the data requests, and then answer the prompt once the data is provided. File paths refer to files on the user's machine that you can request via \`read_file\`.
-`.trim(),
-    role: ChatRole.System,
-  }],
-);
 
 router.get("/api/chat", (ctx) => {
   ctx.response.body = chatHistory.getMessages();
@@ -115,98 +133,13 @@ router.get("/api/chat/events", (ctx) => {
   ctx.response.body = output;
 });
 
-async function submitChatMessages(messages: ChatMessage[], engine: string): Promise<ReadableStream<Uint8Array>> {
-  let actionContainer: ActionContainer | undefined;
-
-  const invokeAction = (action: ParsedActionTag, handleError: (error: Error) => void): ReadableStream<string> => {
-    const decoder = new TextDecoder();
-    const stream = new ReadableStream<string>({
-      async start(controller) {
-        try {
-          actionContainer = actionContainer ?? await getExistingActionContainer() ?? await createActionContainer(dockerImageName, `${actionsDir}/installed`);
-          await actionContainer.actions.invokeAction(action.action, action.parameters, async (process) => {
-            const stdout = process.stdout;
-            if (!stdout) {
-              return;
-            }
-            for await (const stdoutChunk of iterateReader(stdout)) {
-              controller.enqueue(decoder.decode(stdoutChunk));
-            }
-          });
-        } catch (error) {
-          handleError(error);
-          controller.close();
-        } finally {
-          controller.close();
-        }
-      },
-    });
-    return stream;
-  };
-
-  const inputActionErrors: ErrorEvent[] = [];
-
-  {
-    let read: ReadableStreamDefaultReadResult<ChatEvent>;
-
-    const inputActions = readableStreamFromIterable(messages.map((msg) => msg.content))
-      .pipeThrough(ActionTagDecoder())
-      .pipeThrough(ActionExecutionTransformer(chatHistory, invokeAction));
-
-    const reader = inputActions.getReader();
-    while (!(read = await reader.read()).done) {
-      const event = read.value;
-      if (event.type === EventType.MessageAppend) {
-        applyChatEventToHistory(event, chatHistory);
-      } else if (event.type === EventType.Error) {
-        inputActionErrors.push(event);
-      }
-    }
-  }
-
-  const gptResponse = await chatGPT.sendMessage(chatHistory.getMessages(), engine);
-
-  if (!gptResponse.body) {
-    throw new Error("Failed to get response body from ChatGPT API call");
-  }
-
-  const responseMessageIndex = chatHistory.addMessage({ content: "", role: ChatRole.Assistant });
-  const totalMessageCountBefore = chatHistory.getMessages().length;
-
-  const sseDecoder = ChatGPTSSEDecoder();
-  const actionExecutor = ActionExecutionTransformer(chatHistory, invokeAction);
-  const messageTransformer = DeltaMessageTransformer(chatHistory, responseMessageIndex);
-
-  const responseActionErrors = sseDecoder.actions.pipeThrough(actionExecutor);
-  const deltaMsgErrors = sseDecoder.messages.pipeThrough(messageTransformer);
-
-  gptResponse.body.pipeTo(sseDecoder.ingress);
-
-  const errorEvents = mergeReadableStreams(
-    readableStreamFromIterable(inputActionErrors),
-    responseActionErrors,
-    deltaMsgErrors,
-  );
-
-  const output = errorEvents
-    .pipeThrough(new JsonStringifyStream())
-    .pipeThrough(SSEEncoder())
-    .pipeThrough(OnStreamEnd(async () => {
-      if (chatHistory.getMessages().length > totalMessageCountBefore) {
-        await new Promise((resolve) => setTimeout(resolve, 200));
-        return submitChatMessages(chatHistory.getMessages().slice(totalMessageCountBefore), engine);
-      } else {
-        return readableStreamFromIterable([]);
-      }
-    }));
-
-  return output;
-}
-
 router.post("/api/chat", async (ctx) => {
   const body = await ctx.request.body({ type: "json" }).value;
   const engine = body.engine as string ?? "gpt-3.5-turbo";
   const message = body.message as ChatMessage ?? ctx.throw(400, "Missing body parameter: messages");
+
+  // FIXME: Derive a context for every request and set request-specific values there
+  pluginContext.chatConfig.set("engine", engine);
 
   // Add user message to chat history
   chatHistory.addMessage(message);
@@ -214,7 +147,9 @@ router.post("/api/chat", async (ctx) => {
   ctx.response.status = 200;
   ctx.response.headers.set("Cache-Control", "no-cache");
   ctx.response.headers.set("Content-Type", "text/event-stream");
-  ctx.response.body = await submitChatMessages([message], engine);
+  ctx.response.body = (await runtime.userMessageReceived!(message, pluginContext))!
+    .pipeThrough(new JsonStringifyStream())
+    .pipeThrough(SSEEncoder());
 });
 
 app.use(async (ctx, next) => {

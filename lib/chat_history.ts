@@ -1,35 +1,30 @@
 import { EventEmitter } from "https://deno.land/x/event@2.0.1/mod.ts";
-import { ChatMessage } from "./chat_gpt_api.ts";
-import { ChatEvent, ChatRole, EventType, MessageAppendEvent } from "./rungpt_chat_api.ts";
-
-type ChatHistoryEvents = {
-  messageAdded: [message: ChatMessage, messageIndex: number];
-  messageAppended: [message: ChatMessage, messageIndex: number, appended: string];
-};
-
-export interface ChatHistory {
-  readonly events: EventEmitter<ChatHistoryEvents>;
-  addMessage(message: ChatMessage): number;
-  appendToMessage(messageIndex: number, append: string): void;
-  getMessages(): ChatMessage[];
-  messageExists(messageIndex: number): boolean;
-}
+import { ChatHistory, ChatHistoryEvents, ChatMessage } from "../plugins.d.ts";
+import { ChatRole, EventType, MessageAppendEvent } from "./rungpt_chat_api.ts";
 
 export class InMemoryChatHistory implements ChatHistory {
   public readonly events = new EventEmitter<ChatHistoryEvents>();
+  public readonly processingQueue: ChatMessage[] = [];
+
   private messages: ChatMessage[] = [];
 
-  public addMessage(message: ChatMessage): number {
+  public addMessage(message: ChatMessage, options: { noPostProcess?: boolean } = {}): Promise<number> {
     const messageIndex = this.messages.length;
     this.messages.push(message);
+
+    if (!options.noPostProcess) {
+      this.processingQueue.push(message);
+    }
+
     this.events.emit("messageAdded", message, messageIndex);
-    return messageIndex;
+    return Promise.resolve(messageIndex);
   }
 
-  public appendToMessage(messageIndex: number, append: string): void {
+  public appendToMessage(messageIndex: number, append: string): Promise<void> {
     const message = this.messages[messageIndex];
     message.content += append;
     this.events.emit("messageAppended", message, messageIndex, append);
+    return Promise.resolve();
   }
 
   public getMessages(): ChatMessage[] {
@@ -38,22 +33,6 @@ export class InMemoryChatHistory implements ChatHistory {
 
   public messageExists(messageIndex: number): boolean {
     return messageIndex < this.messages.length;
-  }
-}
-
-export function applyChatEventToHistory(event: ChatEvent, chatHistory: ChatHistory) {
-  if (event.type === EventType.MessageAppend) {
-    if (chatHistory.messageExists(event.data.index)) {
-      chatHistory.appendToMessage(event.data.index, event.data.append);
-    } else {
-      const index = chatHistory.addMessage({
-        content: event.data.append,
-        role: event.data.role,
-      });
-      if (index !== event.data.index) {
-        throw new Error("Unexpected message index mismatch");
-      }
-    }
   }
 }
 
@@ -96,10 +75,10 @@ export function AutoInitialMessages(
   initialMessages: ChatMessage[],
 ): ChatHistory {
   const derived: ChatHistory = {
-    addMessage(message: ChatMessage): number {
+    async addMessage(message: ChatMessage): Promise<number> {
       if (chatHistory.getMessages().length === 0) {
         for (const initialMessage of initialMessages) {
-          chatHistory.addMessage(initialMessage);
+          await chatHistory.addMessage(initialMessage, { noPostProcess: true });
         }
       }
       return chatHistory.addMessage(message);
@@ -108,6 +87,7 @@ export function AutoInitialMessages(
     events: chatHistory.events,
     getMessages: chatHistory.getMessages.bind(chatHistory),
     messageExists: chatHistory.messageExists.bind(chatHistory),
+    processingQueue: chatHistory.processingQueue,
   };
   return derived;
 }

@@ -1,9 +1,7 @@
+import { fail } from "https://deno.land/std@0.184.0/testing/asserts.ts";
 import Docker from "https://deno.land/x/denocker@v0.2.1/index.ts";
-import { readableStreamFromIterable } from "https://deno.land/std@0.184.0/streams/mod.ts";
-import { ActionMetadata } from "./actions.ts";
 
 type ActionProcess = Deno.Process<{ cmd: string[], stderr: "piped", stdin: "piped", stdout: "piped" }>;
-type ActionProcessHandler<T> = (process: ActionProcess) => Promise<T> | T;
 
 const actionsContainerName = "rungpt-actions";
 const actionsMountTarget = "/actions/installed";
@@ -14,41 +12,19 @@ const dockerSocket = await tryFiles([
 ]);
 const docker = new Docker(dockerSocket);
 
-async function readStreamToString(stream: ReadableStream) {
-  const decoder = new TextDecoder("utf-8");
-  const reader = stream.getReader();
-
-  let read: ReadableStreamDefaultReadResult<Uint8Array>;
-  let result = "";
-
-  while ((read = await reader.read()) && !read.done) {
-    const chunk = decoder.decode(read.value);
-    result += chunk;
-  }
-
-  // Return the result string
-  return result;
-}
-
-function stringToReadableStream(str: string): ReadableStream {
-  return new ReadableStream({
-    start(controller) {
-      controller.enqueue(new TextEncoder().encode(str));
-      controller.close();
-    },
-  });
-}
-
 export class ActionController {
   constructor(public readonly container: ActionContainer) {}
 
-  private async invoke<T>(action: string[], input: ReadableStream, handler: ActionProcessHandler<T>): Promise<T> {
+  public invokeShell<T>(script: string, callback: (process: ActionProcess) => T): T {
+    let callbackIsAsync = false;
+
     const cmd = [
       "docker",
       "exec",
       this.container.containerId,
-      "/app/docker/action.sh",
-      ...action,
+      "bash",
+      "-c",
+      script.trim() + "\nexit $?\n",
     ];
 
     const process = Deno.run({
@@ -58,74 +34,30 @@ export class ActionController {
       stderr: "piped",
     });
 
-    try {
-      input.pipeTo(process.stdin.writable);
-      return await handler(process);
-    } finally {
+    const cleanUp = () => {
+      process.stdin.writable.close();
+      process.stdout.readable.cancel();
+      process.stderr.readable.cancel();
       process.close();
+    };
+
+    try {
+      let result = callback(process);
+      // deno-lint-ignore no-explicit-any
+      if (result && typeof (result as any).then === "function") {
+        callbackIsAsync = true;
+        // deno-lint-ignore no-explicit-any
+        result = (result as unknown as Promise<any>).then(
+          (res) => { cleanUp(); return res; },
+          (err) => { cleanUp(); throw err; },
+        ) as unknown as T;
+      }
+      return result;
+    } finally {
+      if (!callbackIsAsync) {
+        cleanUp();
+      }
     }
-  }
-
-  invokeAction<T, Params extends { _?: string[] }>(action: string, params: Params, handler: ActionProcessHandler<T>): Promise<T> {
-    const input = readableStreamFromIterable([]);
-    const paramList: string[] = [
-      ...(params._ ?? []),
-      ...Object.entries(params)
-        .filter(([param]) => param !== "_")
-        .map(([param, value]) => `${param}=${value}`),
-    ];
-
-    return this.invoke(["invoke", action, ...paramList], input, async (process) => {
-      try {
-        const result = await handler(process);
-        const status = await process.status();
-
-        if (!status.success) {
-          throw new Error(`Failed to invoke action "${action}" (code ${status.code}, signal ${status.signal ?? "-"})`);
-        }
-        return result;
-      } catch(error) {
-        const stderrBinary = await process.stderrOutput();
-        const stderr = new TextDecoder().decode(stderrBinary);
-        if (stderr) {
-          error.message += `\nUnread stderr from action "${action}": ${stderr.trim()}`;
-        }
-        throw error;
-      } finally {
-        if (!process.stderr.readable.locked) {
-          process.stderr.readable.cancel();
-        }
-        if (!process.stdout.readable.locked) {
-          process.stdout.readable.cancel();
-        }
-      }
-    });
-  }
-
-  listActions(): Promise<string[]> {
-    return this.invoke(["list"], stringToReadableStream(""), async (process: ActionProcess) => {
-      const { status, stderr, stdout } = await capture(process);
-
-      if (!status.success) {
-        throw new Error(`Failed to list actions (code ${status.code}, signal ${status.signal ?? "-"}): ${stderr.trim() || stdout.trim()}`);
-      }
-
-      const actionNames = stdout.split("\n").filter((name) => name.trim().length > 0);
-      return actionNames;
-    });
-  }
-
-  actionMetadata(action: string): Promise<ActionMetadata> {
-    return this.invoke(["show", action, "--json"], stringToReadableStream(""), async (process: ActionProcess) => {
-      const { status, stderr, stdout } = await capture(process);
-
-      if (!status.success) {
-        throw new Error(`Failed to get action metadata of "${action}" (code ${status.code}, signal ${status.signal ?? "-"}): ${stderr.trim() || stdout.trim()}`);
-      }
-
-      const metadata = parseJSON(stdout.trim());
-      return metadata;
-    });
   }
 }
 
@@ -178,7 +110,7 @@ export async function createActionContainer(
     throw new Error(`Failed to create actions container '${name}' using image '${image}' with mount point '${actionsHostPath}': ${container.message}`);
   }
 
-  return new ActionContainer(container.Id);
+  return (await getExistingActionContainer()) || fail(`Failed to retrieve newly created actions container '${name}' with ID '${container.Id}'`);
 }
 
 export async function getExistingActionContainer(): Promise<ActionContainer | null> {
@@ -203,25 +135,6 @@ export async function getExistingActionContainer(): Promise<ActionContainer | nu
   }
 
   return actionContainer;
-}
-
-async function capture(process: ActionProcess): Promise<{ status: Deno.ProcessStatus, stderr: string, stdout: string }> {
-  const [stdout, stderr, status] = await Promise.all([
-    process.stdout ? readStreamToString(process.stdout.readable) : Promise.resolve(""),
-    process.stderr ? readStreamToString(process.stderr.readable) : Promise.resolve(""),
-    process.status(),
-  ]);
-
-  return { status, stdout, stderr };
-}
-
-// deno-lint-ignore no-explicit-any
-function parseJSON(text: string): any {
-  try {
-    return JSON.parse(text);
-  } catch (err) {
-    throw new Error(`Failed to parse JSON: ${err.message}\nJSON: ${text}`);
-  }
 }
 
 async function tryFiles(files: string[]): Promise<string> {

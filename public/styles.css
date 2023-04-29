@@ -81,6 +81,11 @@ h1 {
     font-weight: bold;
 }
 
+.error-message .timestamp::before {
+    content: 'Error ';
+    font-weight: bold;
+}
+
 .system-message .timestamp::before {
     content: 'System ';
     font-weight: bold;
@@ -113,4 +118,15 @@ h1 {
 .user-message .content {
     background-color: #eef2f5;
     color: #101010;
+}
+
+.error-message .content {
+    background-color: #ffe5e5;
+    color: #d12c2c;
+    border-radius: 5px;
+    padding: 0.625rem;
+    font-size: 1em;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    margin-bottom: 1.25rem;
 }

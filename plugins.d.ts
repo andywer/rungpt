@@ -34,7 +34,7 @@ export interface ChatHistory {
 export interface ChatMessage {
   content: string;
   name?: string;
-  role: "assistant" | "user" | "system";
+  role: "assistant" | "error" | "user" | "system";
 }
 
 /// Transparently checks permissions before invoking the action

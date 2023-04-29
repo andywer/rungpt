@@ -2,7 +2,7 @@ import { mergeReadableStreams, readableStreamFromIterable } from "https://deno.l
 import { ChatMessage, PluginContext, RuntimeImplementation } from "../../../../plugins.d.ts";
 import { ActionContainer, createActionContainer, getExistingActionContainer } from "../../../../lib/docker_manager.ts";
 import { ChatGPTSSEDecoder, DeltaMessageTransformer, MarkdownCodeBlockDecoder, OnStreamEnd, ParsedTaggedCodeBlock, TagInvocationBlockDecoder, streamExecutedCommand } from "../../../../lib/stream_transformers.ts";
-import { ChatGPT } from "./lib/chat_gpt_api.ts";
+import { ChatGPT, ChatMessage as ChatGPTMessage } from "./lib/chat_gpt_api.ts";
 
 class ChatGPTRuntime implements RuntimeImplementation {
   private chatGPT: ChatGPT | undefined;
@@ -82,7 +82,8 @@ class ChatGPTRuntime implements RuntimeImplementation {
       }
     }
 
-    const gptResponse = await chatGPT.sendMessage(chatHistory.getMessages(), engine);
+    const nonErrorMessages = chatHistory.getMessages().filter((msg) => msg.role !== "error") as ChatGPTMessage[];
+    const gptResponse = await chatGPT.sendMessage(nonErrorMessages, engine);
 
     if (!gptResponse.body) {
       throw new Error("Failed to get response body from ChatGPT API call");
@@ -126,6 +127,15 @@ class ChatGPTRuntime implements RuntimeImplementation {
           return this.submitChatMessages(chatGPT, context, chatHistory.getMessages().slice(totalMessageCountBefore), engine);
         } else {
           return readableStreamFromIterable([]);
+        }
+      }))
+      .pipeThrough(new TransformStream({
+        transform: async (err, controller) => {
+          try {
+            await chatHistory.addMessage({ content: err.message || JSON.stringify(err, null, 2), role: "error" }, { noPostProcess: true });
+          } finally {
+            controller.enqueue(err);
+          }
         }
       }));
 

@@ -10,7 +10,8 @@ function formatTime(date) {
   return `${hours}:${minutes}`;
 }
 
-function renderNewMessage(content, actions, type, role) {
+function renderNewMessage(message, actions, createdAt) {
+  const { text, type, role } = message;
   let classPrefix = "system";
 
   if (type === "human") {
@@ -31,7 +32,7 @@ function renderNewMessage(content, actions, type, role) {
 
   const timestampElement = document.createElement("span");
   timestampElement.classList.add("timestamp");
-  timestampElement.textContent = formatTime(new Date());
+  timestampElement.textContent = formatTime(createdAt);
   messageElement.appendChild(timestampElement);
 
   const contentElement = document.createElement("span");
@@ -51,7 +52,7 @@ function renderNewMessage(content, actions, type, role) {
   const textElement = document.createElement("span");
   textElement.classList.add("text");
   textElement.innerHTML = "…";
-  textElement.textContent = content;
+  textElement.textContent = text;
   contentElement.appendChild(textElement);
 
   if (type === "ai") {
@@ -172,9 +173,8 @@ async function initializeMessages() {
     throw new Error(`Unexpected response for GET /api/chat: ${response.status}`);
   }
 
-  for (const message of await response.json()) {
-    const { actions = [], text, type, role } = message;
-    const msg = renderNewMessage(text, actions, type, role);
+  for (const { actions = [], createdAt, message } of await response.json()) {
+    const msg = renderNewMessage(message, actions, new Date(createdAt));
     messages.push(msg);
   }
 }
@@ -197,7 +197,7 @@ async function subscribeToChatEvents() {
     if (event.type === "message/append") {
       let message;
       if (event.data.messageIndex >= messages.length) {
-        message = renderNewMessage(event.data.append, [], event.data.type, event.data.role);
+        message = renderNewMessage({ ...event.data, text: event.data.append }, [], new Date());
         messages[event.data.messageIndex] = message;
       } else {
         message = messages[event.data.messageIndex];
@@ -209,7 +209,7 @@ async function subscribeToChatEvents() {
     } else if (event.type === "message/finalize") {
       let message;
       if (event.data.messageIndex >= messages.length) {
-        message = renderNewMessage(event.data.text, event.data.actions, event.data.type, event.data.role);
+        message = renderNewMessage(event.data, event.data.actions, new Date());
         messages[event.data.messageIndex] = message;
       } else {
         message = messages[event.data.messageIndex];

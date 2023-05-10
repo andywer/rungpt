@@ -11,13 +11,15 @@ export enum ChatRole {
   User = "user",
 }
 
+export type ISODateTimeString = string;
+
 /**
  * Single message in a chat, sent by the user, the AI or the framework.
  * Custom data type for our API instead of langchain's `BaseChatMessage`
  * as we need something JSON-serializable.
  */
 export interface ChatMessage {
-  type: "message";
+  createdAt: ISODateTimeString;
   actions: {
     tool: string;
     input: string;

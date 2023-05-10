@@ -8,13 +8,19 @@ import { ChatHistory, ChatHistoryEvents } from "../plugins.d.ts";
 export class InMemoryChatHistory implements ChatHistory {
   public readonly events = new EventEmitter<ChatHistoryEvents>();
 
-  private messages: BaseChatMessage[] = [];
-  private messageActions = new Map<number, ChatMessageT["actions"]>();
+  private messages: {
+    actions: ChatMessageT["actions"];
+    createdAt: Date;
+    message: BaseChatMessage;
+  }[] = [];
 
   public addMessage(message: BaseChatMessage): Promise<number> {
     const messageIndex = this.messages.length;
-    this.messages.push(message);
-    this.messageActions.set(messageIndex, []);
+    this.messages.push({
+      actions: [],
+      createdAt: new Date(),
+      message,
+    });
 
     this.events.emit("chat", {
       type: "message/append",
@@ -29,7 +35,7 @@ export class InMemoryChatHistory implements ChatHistory {
   }
 
   public appendToMessage(messageIndex: number, append: string): Promise<void> {
-    const message = this.messages[messageIndex];
+    const { message } = this.messages[messageIndex];
     message.text += append;
 
     this.events.emit("chat", {
@@ -45,8 +51,8 @@ export class InMemoryChatHistory implements ChatHistory {
   }
 
   public addAction(messageIndex: number, action: AgentAction): Promise<number> {
-    const messageActions = this.messageActions.get(messageIndex)!;
-    messageActions.push({
+    const { actions } = this.messages[messageIndex];
+    actions.push({
       tool: action.tool,
       input: action.toolInput,
     });
@@ -59,36 +65,31 @@ export class InMemoryChatHistory implements ChatHistory {
         messageIndex,
       },
     });
-    return Promise.resolve(messageActions.length - 1);
+    return Promise.resolve(actions.length - 1);
   }
 
-  public getMessages(): BaseChatMessage[] {
+  public getMessages(): { actions: ChatMessageT["actions"], createdAt: Date, message: BaseChatMessage }[] {
     return this.messages;
   }
 
-  public getMessageActions(messageIndex: number): ChatMessageT["actions"] {
-    return this.messageActions.get(messageIndex)!;
-  }
-
   public finalizeMessage(messageIndex: number, text: string, actionResult?: Record<string, unknown>): Promise<void> {
-    const message = this.messages[messageIndex];
-    const actions = this.messageActions.get(messageIndex)!
-      .map((action, idx, all) => (
-        idx === all.length - 1
-          ? { ...action, results: (actionResult || action.results)! }
-          : { results: {}, ...action }
-      ));
+    const { actions, message } = this.messages[messageIndex];
 
     message.text = text;
     for (const [idx, action] of actions.entries()) {
-      this.messageActions.get(messageIndex)![idx] = action;
+      actions[idx] = action;
     }
 
     this.events.emit("chat", {
       type: "message/finalize",
       data: {
         messageIndex,
-        actions,
+        actions: actions
+          .map((action, idx, all) => (
+            idx === all.length - 1
+              ? { ...action, results: (actionResult || action.results)! }
+              : { results: {}, ...action }
+          )),
         role: (message as ChatMessage).role as ChatRole | undefined,
         text,
         type: message._getType(),
@@ -102,8 +103,8 @@ export class InMemoryChatHistory implements ChatHistory {
   }
 
   public setActionResults(messageIndex: number, actionIndex: number, results: Record<string, unknown>): Promise<void> {
-    const messageActions = this.messageActions.get(messageIndex)!;
-    messageActions[actionIndex] = { ...messageActions[actionIndex], results };
+    const actions = this.messages[messageIndex].actions;
+    actions[actionIndex] = { ...actions[actionIndex], results };
     return Promise.resolve();
   }
 

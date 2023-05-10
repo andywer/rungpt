@@ -47,7 +47,7 @@ class ChatGPTRuntime implements RuntimeImplementation {
               await chatHistory.addAction(responseMessageIndex, action);
             },
             async handleAgentEnd(result: AgentFinish) {
-              const prevActions = chatHistory.getMessageActions(responseMessageIndex);
+              const prevActions = chatHistory.getMessages()[responseMessageIndex].actions;
               const lastActionIndex = prevActions.length - 1;
               await chatHistory.setActionResults(responseMessageIndex, lastActionIndex, result.returnValues);
 

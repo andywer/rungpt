@@ -32,8 +32,7 @@ export interface ChatHistory {
   addMessage(message: BaseChatMessage): Promise<number>;
   appendToMessage(messageIndex: number, append: string): Promise<void>;
   finalizeMessage(messageIndex: number, text: string, actionResult?: Record<string, unknown>): Promise<void>;
-  getMessages(): BaseChatMessage[];
-  getMessageActions(messageIndex: number): ChatMessage["actions"];
+  getMessages(): { actions: ChatMessage["actions"], createdAt: Date, message: BaseChatMessage }[];
   messageExists(messageIndex: number): boolean;
   setActionResults(messageIndex: number, actionIndex: number, results: Record<string, unknown>): Promise<void>;
   streamMessage(message: Omit<BaseChatMessage, "text">, text: ReadableStream<string>): Promise<number>;

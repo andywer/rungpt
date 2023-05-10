@@ -3,15 +3,16 @@ import "https://deno.land/std@0.184.0/dotenv/load.ts";
 import { parse } from "https://deno.land/std@0.184.0/flags/mod.ts";
 import { JsonStringifyStream } from "https://deno.land/std@0.184.0/json/mod.ts";
 import { Application, Router, send } from "https://deno.land/x/oak@v12.1.0/mod.ts";
+import { fail } from "https://deno.land/std@0.184.0/testing/asserts.ts";
+import { ChatMessage, MessageType } from "https://esm.sh/langchain/schema";
+import { HumanChatMessage } from "https://esm.sh/langchain/schema";
+import { ChatMessage as ChatMessageT, ChatRole } from "./chat.d.ts";
 import { PluginInstance } from "./plugins.d.ts";
 import { installAction } from "./lib/actions.ts";
 import { InMemoryChatHistory, eventStreamFromChatHistory } from "./lib/chat_history.ts";
 import { SSEEncoder } from "./lib/stream_transformers.ts";
 import { PluginContext, PluginSet } from "./lib/plugins.ts";
 import { PluginLoader } from "./lib/plugin_loader.ts";
-import { fail } from "https://deno.land/std@0.184.0/testing/asserts.ts";
-import { ChatMessage, MessageType } from "https://esm.sh/langchain/schema";
-import { HumanChatMessage } from "https://esm.sh/langchain/schema";
 
 const origJsonParse = JSON.parse.bind(JSON);
 JSON.parse = (...args: Parameters<typeof JSON.parse>) => {
@@ -106,11 +107,14 @@ const router = new Router();
 
 router.get("/api/chat", (ctx) => {
   ctx.response.body = chatHistory.getMessages()
-    .map((msg, idx) => ({
-      ...msg,
-      actions: chatHistory.getMessageActions(idx),
-      role: (msg as ChatMessage).role,
-      type: msg._getType(),
+    .map(({ actions, createdAt, message }): ChatMessageT => ({
+      actions,
+      createdAt: createdAt.toISOString(),
+      message: {
+        ...message,
+        role: (message as ChatMessage).role as ChatRole,
+        type: message._getType(),
+      },
     }));
 });
 

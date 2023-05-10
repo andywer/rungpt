@@ -204,7 +204,7 @@ async function subscribeToChatEvents() {
         message.textElement.textContent += event.data.append;
       }
       if (event.data.type === "ai") {
-        message.contentElement.classList.add("loading");
+        message.contentElement.classList[event.data.append ? "remove" : "add"]("loading");
       }
     } else if (event.type === "message/finalize") {
       let message;

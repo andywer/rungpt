@@ -177,6 +177,8 @@ async function initializeMessages() {
     const msg = renderNewMessage(message, actions, new Date(createdAt));
     messages.push(msg);
   }
+
+  chatBox.scrollTop = chatBox.scrollHeight - chatBox.clientHeight;
 }
 
 async function subscribeToChatEvents() {
@@ -191,6 +193,7 @@ async function subscribeToChatEvents() {
   const reader = stream.pipeThrough(SSEDecoder()).getReader();
 
   while (!(read = await reader.read()).done) {
+    const isScrolledDown = chatBox.scrollTop >= chatBox.scrollHeight - chatBox.clientHeight;
     const event = JSON.parse(read.value);
     console.debug("Received chat event:", event);
 
@@ -223,6 +226,10 @@ async function subscribeToChatEvents() {
       console.error(event);
     } else {
       console.warn(`Unrecognized event:`, event);
+    }
+
+    if (isScrolledDown) {
+      chatBox.scrollTop = chatBox.scrollHeight - chatBox.clientHeight;
     }
   }
 }

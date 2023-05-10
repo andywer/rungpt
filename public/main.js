@@ -10,10 +10,24 @@ function formatTime(date) {
   return `${hours}:${minutes}`;
 }
 
-function renderNewMessage(content, role) {
+function renderNewMessage(content, actions, type, role) {
+  let classPrefix = "system";
+
+  if (type === "human") {
+    classPrefix = "user";
+  } else if (type === "ai") {
+    classPrefix = "assistant";
+  } else if (type === "system") {
+    classPrefix = "system";
+  } else if (type === "generic") {
+    classPrefix = role === "error" ? "error" : "system";
+  } else {
+    console.error(`Unrecognized type: ${type}`);
+  }
+
   const messageElement = document.createElement("div");
   messageElement.classList.add("chat-message");
-  messageElement.classList.add(`${role}-message`);
+  messageElement.classList.add(`${classPrefix}-message`);
 
   const timestampElement = document.createElement("span");
   timestampElement.classList.add("timestamp");
@@ -22,9 +36,30 @@ function renderNewMessage(content, role) {
 
   const contentElement = document.createElement("span");
   contentElement.classList.add("content");
-  contentElement.innerHTML = "…";
-  contentElement.textContent = content;
   messageElement.appendChild(contentElement);
+
+  if (type === "ai") {
+    const actionsListElement = document.createElement("ul");
+    actionsListElement.classList.add("actions");
+    contentElement.appendChild(actionsListElement);
+
+    for (const action of actions) {
+      renderNewAction(action, actionsListElement);
+    }
+  }
+
+  const textElement = document.createElement("span");
+  textElement.classList.add("text");
+  textElement.innerHTML = "…";
+  textElement.textContent = content;
+  contentElement.appendChild(textElement);
+
+  if (type === "ai") {
+    const spinner = document.createElement("span");
+    spinner.classList.add("lds-dual-ring");
+    spinner.classList.add("spinner");
+    contentElement.appendChild(spinner);
+  }
 
   chatBox.appendChild(messageElement);
   chatBox.scrollTop = chatBox.scrollHeight;
@@ -32,7 +67,25 @@ function renderNewMessage(content, role) {
   return {
     contentElement,
     messageElement,
+    textElement,
   };
+}
+
+function renderNewAction(action, actionsListElement) {
+  const actionElement = document.createElement("li");
+  actionElement.classList.add("action");
+
+  const toolElement = document.createElement("span");
+  toolElement.classList.add("tool");
+  toolElement.textContent = action.tool;
+
+  const inputElement = document.createElement("span");
+  inputElement.classList.add("input");
+  inputElement.textContent = action.input;
+
+  actionElement.appendChild(toolElement);
+  actionElement.appendChild(inputElement);
+  actionsListElement.appendChild(actionElement);
 }
 
 chatForm.addEventListener("submit", (event) => {
@@ -54,13 +107,13 @@ chatForm.addEventListener("submit", (event) => {
       },
       body: JSON.stringify({
         message: {
-          content: message,
-          role: "user",
+          text: message,
+          type: "human",
         },
       }),
     });
 
-    await handleErrorSSEStream(response.body);
+    await handleSubmissionSSEStream(response.body);
   })().catch((error) => console.error(error));
 });
 
@@ -102,13 +155,13 @@ function SSEDecoder() {
   return new TransformStream({ transform, flush });
 }
 
-async function handleErrorSSEStream(stream) {
+async function handleSubmissionSSEStream(stream) {
   let read;
   const reader = stream.pipeThrough(SSEDecoder()).getReader();
 
   while (!(read = await reader.read()).done) {
     const event = JSON.parse(read.value);
-    console.error(`Received error event:`, event.data.message);
+    console.debug(`Received event after message submission:`, event.data);
   }
 }
 
@@ -119,8 +172,9 @@ async function initializeMessages() {
     throw new Error(`Unexpected response for GET /api/chat: ${response.status}`);
   }
 
-  for (const { content, role } of await response.json()) {
-    const msg = renderNewMessage(content, role);
+  for (const message of await response.json()) {
+    const { actions = [], text, type, role } = message;
+    const msg = renderNewMessage(text, actions, type, role);
     messages.push(msg);
   }
 }
@@ -141,13 +195,30 @@ async function subscribeToChatEvents() {
     console.debug("Received chat event:", event);
 
     if (event.type === "message/append") {
-      if (event.data.index >= messages.length) {
-        const msg = renderNewMessage(event.data.append, event.data.role);
-        messages[event.data.index] = msg;
+      let message;
+      if (event.data.messageIndex >= messages.length) {
+        message = renderNewMessage(event.data.append, [], event.data.type, event.data.role);
+        messages[event.data.messageIndex] = message;
       } else {
-        const message = messages[event.data.index];
-        message.contentElement.textContent += event.data.append;
+        message = messages[event.data.messageIndex];
+        message.textElement.textContent += event.data.append;
       }
+      if (event.data.type === "ai") {
+        message.contentElement.classList.add("loading");
+      }
+    } else if (event.type === "message/finalize") {
+      let message;
+      if (event.data.messageIndex >= messages.length) {
+        message = renderNewMessage(event.data.text, event.data.actions, event.data.type, event.data.role);
+        messages[event.data.messageIndex] = message;
+      } else {
+        message = messages[event.data.messageIndex];
+        message.textElement.textContent = event.data.text;
+      }
+      message.contentElement.classList.remove("loading");
+    } else if (event.type === "agent/action") {
+      const message = messages[event.data.messageIndex];
+      renderNewAction(event.data, message.contentElement.querySelector(".actions"));
     } else if (event.type === "error") {
       console.error(event);
     } else {

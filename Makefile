@@ -1,20 +1,25 @@
 # Makefile
 
 # Variables
+DENO_PERMISSIONS=--allow-net --allow-read --allow-write --allow-env --allow-run --unstable
 DOCKER_IMAGE_NAME=rungpt_actions:latest
 
 # Main Deno app targets
 .PHONY: build
 build:
-	deno compile --unstable --allow-net --allow-read --allow-write --allow-env -o rungpt rungpt.ts
+	deno compile $(DENO_PERMISSIONS) -o rungpt rungpt.ts
 
 .PHONY: run
 run:
-	deno run --unstable --allow-net --allow-read --allow-write --allow-env --allow-run rungpt.ts
+	deno run $(DENO_PERMISSIONS) rungpt.ts
 
 .PHONY: dev
 dev:
-	deno run --unstable --allow-net --allow-read --allow-write --allow-env --allow-run --watch rungpt.ts
+	deno run $(DENO_PERMISSIONS) --watch rungpt.ts
+
+.PHONY: inspect
+inspect:
+	deno run $(DENO_PERMISSIONS) --inspect rungpt.ts
 
 # Actions Docker image targets
 .PHONY: docker-build

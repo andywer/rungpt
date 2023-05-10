@@ -1,30 +1,14 @@
-import { JsonParseStream } from "https://deno.land/std@0.184.0/json/mod.ts";
 import { readableStreamFromIterable } from "https://deno.land/std@0.184.0/streams/readable_stream_from_iterable.ts";
-import { ChatHistory, ChatMessage, ParameterType, Parameters, ParsedCodeBlockTag } from "../plugins.d.ts";
 import { mergeReadableStreams } from "https://deno.land/std@0.184.0/streams/merge_readable_streams.ts";
+import { BaseChatMessage } from "https://esm.sh/v118/langchain@0.0.67/schema.js";
+import { ParameterType, Parameters, ParsedCodeBlockTag } from "../plugins.d.ts";
 import { AnsiStripper } from "./ansi.ts";
 
-// Add a regular expression for detecting action-specific tags
-const ACTION_INVOCATION_REGEX = /(\w+)\s*((?:\w+\s*=\s*[^,=\s]+(?:,\s*)?)*\w*\s*(?:\((?:[^{}()]|\([^{}()]*\))*\))?)/;
-
-export interface ParsedActionInvocation {
-  action: string;
-  parameters: Parameters;
-}
-
-export interface DeltaMessage {
-  choices: {
-    delta: {
-      content: string;
-    };
-  }[];
-}
-
-export function ProcessMessageContent<T>(decode: (input: ReadableStream<string>) => ReadableStream<T>): TransformStream<ChatMessage, [T, ChatMessage]> {
-  return new TransformStream<ChatMessage, [T, ChatMessage]>({
+export function ProcessMessageContent<T>(decode: (input: ReadableStream<string>) => ReadableStream<T>): TransformStream<BaseChatMessage, [T, BaseChatMessage]> {
+  return new TransformStream<BaseChatMessage, [T, BaseChatMessage]>({
     async transform(message, controller) {
       let read: ReadableStreamDefaultReadResult<T>;
-      const decoding = decode(readableStreamFromIterable([message.content]));
+      const decoding = decode(readableStreamFromIterable([message.text]));
       const reader = decoding.getReader();
 
       while ((read = await reader.read()) && !read.done) {
@@ -77,42 +61,9 @@ export function MarkdownCodeBlockDecoder(consecutiveUpdates = false): TransformS
   });
 }
 
-export function ActionInvocationDecoder(): TransformStream<ParsedCodeBlock, ParsedActionInvocation> {
-  return new TransformStream<ParsedCodeBlock, ParsedActionInvocation>({
-    transform(block, controller) {
-      if (block.tag !== "rungpt:action") return;
-
-      const errors: Error[] = [];
-      const lines = block.content.split("\n");
-
-      for (const line of lines.filter(line => line.trim().length > 0)) {
-        try {
-          const match = ACTION_INVOCATION_REGEX.exec(line);
-
-          if (!match) {
-            throw new Error(`Invalid action invocation: ${line}`);
-          }
-
-          const [, action, paramList] = match;
-          controller.enqueue({
-            action,
-            parameters: parseParameters(paramList),
-          });
-        } catch (error) {
-          errors.push(error);
-        }
-      }
-
-      if (errors.length > 0) {
-        throw errors[0];
-      }
-    },
-  });
-}
-
 export interface ParsedTaggedCodeBlock {
   block: ParsedCodeBlock;
-  tag: ParsedCodeBlockTag
+  tag: ParsedCodeBlockTag;
 }
 
 export function TagInvocationBlockDecoder(): TransformStream<ParsedCodeBlock, ParsedTaggedCodeBlock> {
@@ -149,18 +100,6 @@ function parseCodeBlockTag(raw: string): ParsedCodeBlockTag {
       };
     }),
   };
-}
-
-function DeltaMessageContentDecoder(message: ChatMessage): TransformStream<DeltaMessage, ChatMessage> {
-  return new TransformStream<DeltaMessage, ChatMessage>({
-    transform(data, controller) {
-      const { content } = data.choices[0].delta;
-      controller.enqueue({
-        ...message,
-        content: message.content + content ?? "",
-      });
-    },
-  });
 }
 
 function parseParameters(parameterString: string): Parameters {
@@ -251,32 +190,6 @@ export function SSEEncoder(): TransformStream<string, Uint8Array> {
   });
 }
 
-export function StreamCloser(closeString: string): TransformStream<string, string> {
-  let closed = false;
-
-  return new TransformStream({
-    transform(chunk: string, controller: TransformStreamDefaultController<string>) {
-      if (closed) return;
-
-      if (chunk === closeString) {
-        closed = true;
-      } else {
-        controller.enqueue(chunk);
-      }
-    },
-  });
-}
-
-export function DeltaMessageTransformer(chatHistory: ChatHistory, messageIndex: number): TransformStream<DeltaMessage, Error> {
-  return new TransformStream({
-    async transform(chunk: DeltaMessage) {
-      if (!chunk.choices[0].delta.content) return;
-
-      await chatHistory.appendToMessage(messageIndex, chunk.choices[0].delta.content);
-    },
-  });
-}
-
 export function streamExecutedCommand(process: Deno.Process<{ cmd: string[], stderr: "piped", stdout: "piped" }>): ReadableStream<string> {
   type Marking = "STDOUT" | "STDERR";
   type MarkedChunk = [Marking, string];
@@ -316,42 +229,6 @@ export function streamExecutedCommand(process: Deno.Process<{ cmd: string[], std
   return output.readable;
 }
 
-export interface ChatGPTSSETransformer {
-  ingress: WritableStream<Uint8Array>;
-  messages: ReadableStream<DeltaMessage>;
-  tags: ReadableStream<ParsedTaggedCodeBlock>;
-}
-
-export function ChatGPTSSEDecoder(message: ChatMessage): ChatGPTSSETransformer {
-  let latestMessageContent = "";
-
-  const sseDecoder = SSEDecoder();
-  const rawMessages = sseDecoder.readable
-    .pipeThrough(StreamCloser("[DONE]"))
-    .pipeThrough(new JsonParseStream()) as unknown as ReadableStream<DeltaMessage>;
-
-  const [rawMessages1, rawMessages2] = rawMessages.tee();
-  const tags = rawMessages2
-    .pipeThrough(DeltaMessageContentDecoder(message))
-    .pipeThrough(new TransformStream({
-      transform(msg) {
-        latestMessageContent = msg.content;
-      },
-      flush(controller) {
-        if (!latestMessageContent) return;
-        controller.enqueue(latestMessageContent);
-      },
-    }))
-    .pipeThrough(MarkdownCodeBlockDecoder(true))
-    .pipeThrough(TagInvocationBlockDecoder())
-
-  return {
-    ingress: sseDecoder.writable,
-    messages: rawMessages1,
-    tags,
-  };
-}
-
 export function OnStreamEnd<T>(callback: () => Promise<ReadableStream<T>> | ReadableStream<T>): TransformStream<T, T> {
   let done = false;
   return new TransformStream({
@@ -364,18 +241,6 @@ export function OnStreamEnd<T>(callback: () => Promise<ReadableStream<T>> | Read
 
       while (!(read = await reader.read()).done) {
         controller.enqueue(read.value);
-      }
-    },
-  });
-}
-
-export function OnStreamValue<T>(callback: (value: T) => void): TransformStream<T, T> {
-  return new TransformStream({
-    transform(value: T, controller: TransformStreamDefaultController<T>) {
-      try {
-        callback(value);
-      } finally {
-        controller.enqueue(value);
       }
     },
   });

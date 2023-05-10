@@ -1,4 +1,9 @@
+import { AgentAction, BaseChatMessage } from "https://esm.sh/langchain/schema";
+import { BaseLanguageModel } from "https://esm.sh/v118/langchain@0.0.67/base_language";
+import { Tool } from "https://esm.sh/v118/langchain@0.0.67/tools";
 import { EventEmitter } from "https://deno.land/x/event@2.0.1/mod.ts";
+import { ChatEvent } from "./chat_events.d.ts";
+import { ChatMessage } from "./chat.d.ts";
 
 export interface PluginMetadata {
   schema_version: string;
@@ -18,51 +23,36 @@ export interface TagMetadata {
 }
 
 type ChatHistoryEvents = {
-  messageAdded: [message: ChatMessage, messageIndex: number];
-  messageAppended: [message: ChatMessage, messageIndex: number, appended: string];
+  chat: [event: ChatEvent];
 };
 
 export interface ChatHistory {
   readonly events: EventEmitter<ChatHistoryEvents>;
-  readonly processingQueue: ChatMessage[];
-  addMessage(message: ChatMessage, options?: { noPostProcess?: boolean }): Promise<number>;
+  addAction(messageIndex: number, action: AgentAction): Promise<number>;
+  addMessage(message: BaseChatMessage): Promise<number>;
   appendToMessage(messageIndex: number, append: string): Promise<void>;
-  getMessages(): ChatMessage[];
+  finalizeMessage(messageIndex: number, text: string, actionResult?: Record<string, unknown>): Promise<void>;
+  getMessages(): BaseChatMessage[];
+  getMessageActions(messageIndex: number): ChatMessage["actions"];
   messageExists(messageIndex: number): boolean;
+  setActionResults(messageIndex: number, actionIndex: number, results: Record<string, unknown>): Promise<void>;
+  streamMessage(message: Omit<BaseChatMessage, "text">, text: ReadableStream<string>): Promise<number>;
 }
 
-export interface ChatMessage {
-  content: string;
-  name?: string;
-  role: "assistant" | "error" | "user" | "system";
-}
-
-/// Transparently checks permissions before invoking the action
-export interface FileSystem {
-  mkdir: typeof Deno.mkdir;
-  readDir: typeof Deno.readDir;
-  readTextFile: typeof Deno.readTextFile;
-  remove: typeof Deno.remove;
-  rename: typeof Deno.rename;
-  symlink: typeof Deno.symlink;
-  writeTextFile: typeof Deno.writeTextFile;
-}
-
-export interface PermissionsManager {
-  assertPermission(resourceType: "filesystem", path: string | URL, access?: "read" | "write"): void | never;
-  isPermitted(resourceType: "filesystem", path: string | URL, access?: "read" | "write"): boolean;
-}
+export type ChatMessageRole = "briefing" | "error";
 
 export interface PluginInstance {
-  metadata: PluginMetadata;
-  runtimes?: Record<string, RuntimeImplementation>;
-  tags?: Record<string, TagImplementation>;
+  readonly metadata: PluginMetadata;
+  readonly models: PluginProvision<BaseLanguageModel>;
+  readonly runtimes: PluginProvision<RuntimeImplementation>;
+  readonly tools: PluginProvision<Tool>;
 }
 
 export interface PluginSet {
   readonly plugins: PluginInstance[];
-  readonly runtimes: Map<string, RuntimeImplementation>;
-  readonly tags: Map<string, TagImplementation>;
+  readonly models: PluginProvision<BaseLanguageModel>;
+  readonly runtimes: PluginProvision<RuntimeImplementation>;
+  readonly tools: PluginProvision<Tool>;
 }
 
 export type WellKnownSecretID = "api.openai.com";
@@ -73,12 +63,15 @@ export interface SecretsStore {
   store(secretName: WellKnownSecretID | string, secretData: string): Promise<void>;
 }
 
+export interface PluginProvision<T> {
+  load(name: string): Promise<T>;
+  list(): string[];
+}
+
 export interface PluginContext {
   chatConfig: Map<"engine" | string, string>;
   chatHistory: ChatHistory;
   enabledPlugins: PluginSet;
-  filesystem: FileSystem;
-  permissions: PermissionsManager;
   secrets: SecretsStore;
 }
 
@@ -108,22 +101,6 @@ export interface ParsedCodeBlockTag {
  * immediately sent to the AI.
  */
 export interface RuntimeImplementation {
-  chatCreated?(context: PluginContext): Promise<void>;
-  userMessageReceived?(message: ChatMessage, context: PluginContext): Promise<ReadableStream<Error> | void> | ReadableStream<Error>;
-}
-
-/**
- * A tag implementation can customize the handling of code blocks whose
- * tag references the tag implementation's name.
- *
- * For example, the `write_file` tag implementation writes the code block
- * contents to a file.
- *
- * ```python;write_file("./example.py")
- * print("Hello world!")
- * ```
- */
-export interface TagImplementation {
-  metadata: TagMetadata;
-  invoke(codeBlockContent: string, codeBlockTag: ParsedCodeBlockTag, message: ChatMessage, context: PluginContext): Promise<void>;
+  handleChatCreation?(context: PluginContext): Promise<void>;
+  handleUserMessage(message: BaseChatMessage, context: PluginContext): Promise<ReadableStream<ChatEvent>> | ReadableStream<ChatEvent>;
 }

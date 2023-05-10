@@ -3,14 +3,25 @@ import "https://deno.land/std@0.184.0/dotenv/load.ts";
 import { parse } from "https://deno.land/std@0.184.0/flags/mod.ts";
 import { JsonStringifyStream } from "https://deno.land/std@0.184.0/json/mod.ts";
 import { Application, Router, send } from "https://deno.land/x/oak@v12.1.0/mod.ts";
-import { ChatMessage, PluginInstance } from "./plugins.d.ts";
+import { PluginInstance } from "./plugins.d.ts";
 import { installAction } from "./lib/actions.ts";
-import { AutoInitialMessages, InMemoryChatHistory, eventStreamFromChatHistory } from "./lib/chat_history.ts";
+import { InMemoryChatHistory, eventStreamFromChatHistory } from "./lib/chat_history.ts";
 import { SSEEncoder } from "./lib/stream_transformers.ts";
-import { ChatRole } from "./lib/rungpt_chat_api.ts";
-import { AccessControlList, PluginContext, PluginSet } from "./lib/plugins.ts";
+import { PluginContext, PluginSet } from "./lib/plugins.ts";
 import { PluginLoader } from "./lib/plugin_loader.ts";
 import { fail } from "https://deno.land/std@0.184.0/testing/asserts.ts";
+import { ChatMessage, MessageType } from "https://esm.sh/langchain/schema";
+import { HumanChatMessage } from "https://esm.sh/langchain/schema";
+
+const origJsonParse = JSON.parse.bind(JSON);
+JSON.parse = (...args: Parameters<typeof JSON.parse>) => {
+  try {
+    return origJsonParse(...args);
+  } catch (err) {
+    err.message = `${err.message}\nSource: ${args[0]}`;
+    throw err;
+  }
+};
 
 const appUrl = new URL(import.meta.url);
 const appPath = await Deno.realPath(new URL(".", appUrl).pathname);
@@ -63,9 +74,12 @@ if (args.install) {
   Deno.exit(0);
 }
 
+const chatHistory = new InMemoryChatHistory();
+const loaderContext = new PluginContext(new PluginSet([]), chatHistory);
+
 const loadAllPlugins = async (loader: PluginLoader): Promise<PluginInstance[]> => {
   const plugins: PluginInstance[] = [];
-  for await (const plugin of loader.loadPlugins()) {
+  for await (const plugin of loader.loadPlugins(loaderContext)) {
     plugins.push(plugin);
   }
   return plugins;
@@ -76,32 +90,11 @@ pluginLoader.events.on("plugin/discovered", (path) => console.debug(`Plugin disc
 pluginLoader.events.on("plugin/loaded", (plugin) => console.debug(`Plugin ${plugin.metadata.name_for_model} loaded.`));
 const enabledPlugins = new PluginSet(await loadAllPlugins(pluginLoader));
 
-const chatHistory = AutoInitialMessages(
-  new InMemoryChatHistory(),
-  [{
-    content: `
-Hello GPT-3.5!
-
-Execute sandboxed Linux shell commands using triple backtick sh;rungpt snippets. You have full access and permission for data fetching, internet usage, and APIs.
-
-    Example:
-\`\`\`sh;rungpt
-cat "/tmp/test.txt"
-\`\`\`
-`.trim(),
-    role: ChatRole.System,
-  }],
-);
-
-const acl: AccessControlList = [
-  { resource: ["filesystem", Deno.cwd()], permissions: ["read"] },
-  { resource: ["filesystem", "/etc/*"], permissions: ["read"] },
-];
-
-const pluginContext = new PluginContext(enabledPlugins, chatHistory, acl);
+const pluginContext = new PluginContext(enabledPlugins, chatHistory);
 await pluginContext.secrets.store("api.openai.com", await getApiKey());
 
-const runtime = pluginContext.enabledPlugins.runtimes.get("default") || fail("Default runtime not found");
+const runtime = await pluginContext.enabledPlugins.runtimes.load("default")
+  || fail("Default runtime not found\n  Available runtimes: " + pluginContext.enabledPlugins.runtimes.list().join(", "));
 
 // Get the port number from the arguments or use the default value
 const port = (args.port || args.p || 8080) as number;
@@ -112,7 +105,13 @@ const app = new Application();
 const router = new Router();
 
 router.get("/api/chat", (ctx) => {
-  ctx.response.body = chatHistory.getMessages();
+  ctx.response.body = chatHistory.getMessages()
+    .map((msg, idx) => ({
+      ...msg,
+      actions: chatHistory.getMessageActions(idx),
+      role: (msg as ChatMessage).role,
+      type: msg._getType(),
+    }));
 });
 
 router.get("/api/chat/events", (ctx) => {
@@ -129,18 +128,21 @@ router.get("/api/chat/events", (ctx) => {
 router.post("/api/chat", async (ctx) => {
   const body = await ctx.request.body({ type: "json" }).value;
   const engine = body.engine as string ?? "gpt-3.5-turbo";
-  const message = body.message as ChatMessage ?? ctx.throw(400, "Missing body parameter: messages");
+  const messageData = body.message as { text: string, type: MessageType } ?? ctx.throw(400, "Missing body parameter: messages");
 
   // FIXME: Derive a context for every request and set request-specific values there
   pluginContext.chatConfig.set("engine", engine);
 
-  // Add user message to chat history
-  chatHistory.addMessage(message);
+  if (chatHistory.getMessages().length === 0 && runtime.handleChatCreation) {
+    await runtime.handleChatCreation(pluginContext);
+  }
+
+  const message = new HumanChatMessage(messageData.text);
 
   ctx.response.status = 200;
   ctx.response.headers.set("Cache-Control", "no-cache");
   ctx.response.headers.set("Content-Type", "text/event-stream");
-  ctx.response.body = (await runtime.userMessageReceived!(message, pluginContext))!
+  ctx.response.body = (await runtime.handleUserMessage(message, pluginContext))!
     .pipeThrough(new JsonStringifyStream())
     .pipeThrough(SSEEncoder());
 });

@@ -76,6 +76,10 @@ h1 {
     margin-bottom: 0.1875rem;
 }
 
+.assistant-message .timestamp, .error-message .timestamp {
+    text-align: end;
+}
+
 .assistant-message .timestamp::before {
     content: 'GPT ';
     font-weight: bold;
@@ -97,9 +101,50 @@ h1 {
 }
 
 .content {
+    display: flex;
+    flex-direction: column;
     padding: 0.625rem;
     border-radius: 10px;
     background-color: #f0f2f5;
+}
+
+.actions {
+    list-style-type: none;
+    padding: 0;
+    margin: 0 0 1em;
+}
+
+.action {
+    display: flex;
+    flex-direction: column;
+    padding: 0.5em;
+    background-color: #eef2f5;
+    border-radius: 5px;
+    margin-bottom: 0.5em;
+}
+
+.tool {
+    font-weight: bold;
+    color: #2c3e50;
+}
+
+.input {
+    margin: 0.25em 0 0;
+    font-size: 0.85em;
+    color: #999;
+}
+
+.content .spinner {
+    align-self: center;
+    margin: -1em 0 1em;
+}
+
+.content:not(.loading) .spinner {
+    display: none;
+}
+
+.content .text {
+    padding: 0 0.625rem;
     font-size: 1em;
     line-height: 1.4;
     white-space: pre-wrap;
@@ -129,4 +174,29 @@ h1 {
     line-height: 1.4;
     white-space: pre-wrap;
     margin-bottom: 1.25rem;
+}
+
+.lds-dual-ring {
+    display: inline-block;
+    width: 40px;
+    height: 40px;
+}
+.lds-dual-ring:after {
+    content: " ";
+    display: block;
+    width: 32px;
+    height: 32px;
+    margin: 8px;
+    border-radius: 50%;
+    border: 6px solid #fff;
+    border-color: #fff transparent #fff transparent;
+    animation: lds-dual-ring 1.2s linear infinite;
+}
+@keyframes lds-dual-ring {
+    0% {
+        transform: rotate(0deg);
+    }
+    100% {
+        transform: rotate(360deg);
+    }
 }

@@ -1,6 +1,13 @@
 import * as path from "https://deno.land/std@0.184.0/path/mod.ts";
 import { EventEmitter } from "https://deno.land/x/event@2.0.1/mod.ts";
-import { PluginInstance, RuntimeImplementation, TagImplementation } from "../plugins.d.ts";
+import { PluginInstance, PluginProvision, RuntimeImplementation } from "../plugins.d.ts";
+import { PluginContext } from "./plugins.ts";
+import { BaseLanguageModel } from "https://esm.sh/v118/langchain@0.0.67/base_language.js";
+import { Tool } from "https://esm.sh/v118/langchain@0.0.67/tools.js";
+
+export interface Initializer<T> {
+  (ctx: PluginContext): Promise<T> | T;
+}
 
 export type PluginEvents = {
   "plugin/discovered": [string];
@@ -14,7 +21,7 @@ export class PluginLoader {
     private readonly pluginsPath: string,
   ) {}
 
-  async* loadPlugins(): AsyncIterable<PluginInstance> {
+  async* loadPlugins(context: PluginContext): AsyncIterable<PluginInstance> {
     for await (const dirEntry of Deno.readDir(this.pluginsPath)) {
       if (dirEntry.isDirectory && !dirEntry.name.match(/^[\._]/)) {
         try {
@@ -25,54 +32,53 @@ export class PluginLoader {
         const pluginPath = `${this.pluginsPath}/${dirEntry.name}`;
         this.events.emit("plugin/discovered", pluginPath);
 
-        yield this.loadPlugin(pluginPath);
+        yield this.loadPlugin(pluginPath, context);
       }
     }
   }
 
-  async loadPlugin(pluginPath: string): Promise<PluginInstance> {
+  async loadPlugin(pluginPath: string, context: PluginContext): Promise<PluginInstance> {
     const metadata = await import(`${pluginPath}/manifest.json`, { assert: { type: "json" } });
-    const [runtimes, tags] = await Promise.all([
-      this.loadPluginRuntimes(pluginPath),
-      this.loadPluginTags(pluginPath),
+    const [models, runtimes, tools] = await Promise.all([
+      this.loadPluginModels(pluginPath, context),
+      this.loadPluginRuntimes(pluginPath, context),
+      this.loadPluginTools(pluginPath, context),
     ]);
     const plugin: PluginInstance = {
       metadata: metadata.default,
+      models,
       runtimes,
-      tags,
+      tools,
     };
     this.events.emit("plugin/loaded", plugin);
     return plugin;
   }
 
-  private loadPluginRuntimes(pluginPath: string): Promise<PluginInstance["runtimes"]> {
-    const validate = (runtime: RuntimeImplementation, runtimePath: string) => {
-      if (!runtime.chatCreated && !runtime.userMessageReceived) {
-        throw new Error(`No functionality defined in ${runtimePath}`);
-      }
-    };
-    return this.loadPluginModules(pluginPath, "runtimes", "runtime.ts", validate);
+  private async loadPluginModels(pluginPath: string, context: PluginContext): Promise<PluginInstance["models"]> {
+    const initializers = await this.loadPluginModules<BaseLanguageModel>(pluginPath, "models", "model.ts");
+    return new Provision(initializers, context);
   }
 
-  private loadPluginTags(pluginPath: string): Promise<PluginInstance["tags"]> {
-    const validate = (tag: TagImplementation, tagPath: string) => {
-      if (!tag.metadata) {
-        throw new Error(`Missing metadata in ${tagPath}`);
-      }
-    };
-    return this.loadPluginModules(pluginPath, "tags", "tag.ts", validate);
+  private async loadPluginRuntimes(pluginPath: string, context: PluginContext): Promise<PluginInstance["runtimes"]> {
+    const initializers = await this.loadPluginModules<RuntimeImplementation>(pluginPath, "runtimes", "runtime.ts");
+    return new Provision(initializers, context);
   }
 
-  private async loadPluginModules<T extends RuntimeImplementation | TagImplementation>
-    (pluginPath: string, subdirName: string, moduleName: string, validate: (mod: T, modPath: string) => void): Promise<Record<string, T> | undefined>
+  private async loadPluginTools(pluginPath: string, context: PluginContext): Promise<PluginInstance["tools"]> {
+    const initializers = await this.loadPluginModules<Tool>(pluginPath, "tools", "tool.ts");
+    return new Provision(initializers, context);
+  }
+
+  private async loadPluginModules<T>
+    (pluginPath: string, subdirName: string, moduleName: string): Promise<Map<string, Initializer<T>>>
   {
-    const modules: Record<string, T> = {};
+    const modules = new Map<string, Initializer<T>>();
     const modulesPath = path.join(pluginPath, subdirName);
 
     try {
       await Deno.stat(modulesPath);
     } catch {
-      return undefined;
+      return modules;
     }
 
     for await (const dirEntry of Deno.readDir(modulesPath)) {
@@ -81,20 +87,37 @@ export class PluginLoader {
         try {
           const stat = await Deno.stat(modPath);
           if (stat.isFile) {
-            const mod = await import(modPath) as { default: T };
-            modules[dirEntry.name] = mod.default;
+            const mod = await import(modPath) as { default: Initializer<T> };
+            modules.set(dirEntry.name, mod.default);
           }
         } catch {
           continue;
         }
 
-        if (!modules[dirEntry.name]) {
+        if (!modules.has(dirEntry.name)) {
           throw new Error(`No default export in ${modPath}`);
         }
-        validate(modules[dirEntry.name], modPath);
       }
     }
 
     return modules;
+  }
+}
+
+class Provision<T> implements PluginProvision<T> {
+  constructor(
+    private initializers: Map<string, (ctx: PluginContext) => Promise<T> | T>,
+    private context: PluginContext,
+  ) {}
+
+  async load(name: string): Promise<T> {
+    const initializer = this.initializers.get(name);
+    if (!initializer) {
+      throw new Error(`No initializer for ${name}`);
+    }
+    return await initializer(this.context);
+  }
+  list(): string[] {
+    return Array.from(this.initializers.keys());
   }
 }

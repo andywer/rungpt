@@ -56,17 +56,25 @@ export class PluginLoader {
 
   private async loadPluginModels(pluginPath: string, context: PluginContext): Promise<PluginInstance["models"]> {
     const initializers = await this.loadPluginModules<BaseLanguageModel>(pluginPath, "models", "model.ts");
-    return new Provision(initializers, context);
+    return new Provision(initializers, context, () => void(0));
   }
 
   private async loadPluginRuntimes(pluginPath: string, context: PluginContext): Promise<PluginInstance["runtimes"]> {
     const initializers = await this.loadPluginModules<RuntimeImplementation>(pluginPath, "runtimes", "runtime.ts");
-    return new Provision(initializers, context);
+    return new Provision(initializers, context, () => void(0));
   }
 
   private async loadPluginTools(pluginPath: string, context: PluginContext): Promise<PluginInstance["tools"]> {
     const initializers = await this.loadPluginModules<Tool>(pluginPath, "tools", "tool.ts");
-    return new Provision(initializers, context);
+    const validate = (tool: Tool, name: string) => {
+      try {
+        if (!tool.name) throw new Error(`Tool name is required`);
+        if (!tool.description) throw new Error(`Tool description is required`);
+      } catch (err) {
+        throw new Error(`Invalid tool "${name}": ${err.message}`);
+      }
+    };
+    return new Provision(initializers, context, validate);
   }
 
   private async loadPluginModules<T>
@@ -108,6 +116,7 @@ class Provision<T> implements PluginProvision<T> {
   constructor(
     private initializers: Map<string, (ctx: PluginContext) => Promise<T> | T>,
     private context: PluginContext,
+    private validate: (loaded: T, name: string) => void,
   ) {}
 
   async load(name: string): Promise<T> {
@@ -115,8 +124,16 @@ class Provision<T> implements PluginProvision<T> {
     if (!initializer) {
       throw new Error(`No initializer for ${name}`);
     }
-    return await initializer(this.context);
+    const loaded = await initializer(this.context);
+    this.validate(loaded, name);
+    return loaded;
   }
+
+  async loadAll(): Promise<T[]> {
+    return await Promise.all(Array.from(this.initializers.values())
+      .map((initializer) => initializer(this.context)));
+  }
+
   list(): string[] {
     return Array.from(this.initializers.keys());
   }

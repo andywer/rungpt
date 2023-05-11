@@ -3,8 +3,6 @@ export interface ActionMetadata {
   name_for_human: string;
   name_for_model: string;
   description_for_human: string;
-  description_for_model: string;
-  logo_url: string;
 }
 
 export async function installAction(actionsDir: string, repo: string, version: string): Promise<string> {
@@ -46,8 +44,6 @@ function validateActionMetadata(metadata: any): metadata is ActionMetadata {
     name_for_human: "string",
     name_for_model: "string",
     description_for_human: "string",
-    description_for_model: "string",
-    logo_url: "string",
   };
 
   for (const [property, type] of Object.entries(requiredProperties)) {

@@ -1,5 +1,5 @@
 import { assertEquals, assertInstanceOf } from "https://deno.land/std@0.184.0/testing/asserts.ts";
-import { ActionContainer, createActionContainer, getExistingActionContainer } from "../lib/docker_manager.ts";
+import { ActionContainer, createActionContainer, getExistingActionContainer } from "../plugins/docker.builtin/lib/docker_manager.ts";
 
 const dockerImageName = "rungpt_actions:latest";
 

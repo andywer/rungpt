@@ -1,0 +1,6 @@
+{
+    "schema_version": "0.0.0",
+    "name_for_human": "Built-in docker support",
+    "name_for_model": "docker",
+    "description_for_human": "Built-in docker support for RunGPT"
+  }

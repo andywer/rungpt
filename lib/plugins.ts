@@ -56,7 +56,7 @@ export class PluginSet implements PluginSetT {
         lookup.set(name, plugin);
       }
     }
-    return {
+    const aggregated: PluginProvision<T> = {
       load(name: string): Promise<T> {
         const plugin = lookup.get(name);
         if (!plugin) {
@@ -64,9 +64,16 @@ export class PluginSet implements PluginSetT {
         }
         return plugin[key].load(name) as Promise<T>;
       },
+      async loadAll(): Promise<T[]> {
+        return (await Promise.all(
+          Array.from(lookup.values())
+            .map((plugin) => plugin[key].loadAll())
+        )).flat() as T[];
+      },
       list(): string[] {
         return Array.from(lookup.keys());
       },
     };
+    return aggregated;
   }
 }

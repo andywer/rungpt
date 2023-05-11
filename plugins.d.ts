@@ -64,6 +64,7 @@ export interface SecretsStore {
 
 export interface PluginProvision<T> {
   load(name: string): Promise<T>;
+  loadAll(): Promise<T[]>;
   list(): string[];
 }
 

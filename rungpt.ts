@@ -3,7 +3,6 @@ import "https://deno.land/std@0.184.0/dotenv/load.ts";
 import { parse } from "https://deno.land/std@0.184.0/flags/mod.ts";
 import { JsonStringifyStream } from "https://deno.land/std@0.184.0/json/mod.ts";
 import { Application, Router, send } from "https://deno.land/x/oak@v12.1.0/mod.ts";
-import { fail } from "https://deno.land/std@0.184.0/testing/asserts.ts";
 import { ChatMessage, MessageType } from "https://esm.sh/langchain/schema";
 import { HumanChatMessage } from "https://esm.sh/langchain/schema";
 import { ChatMessage as ChatMessageT, ChatRole } from "./chat.d.ts";
@@ -13,6 +12,7 @@ import { InMemoryChatHistory, eventStreamFromChatHistory } from "./lib/chat_hist
 import { SSEEncoder } from "./lib/stream_transformers.ts";
 import { PluginContext, PluginSet } from "./lib/plugins.ts";
 import { PluginLoader } from "./lib/plugin_loader.ts";
+import { ChatGPTRuntime } from "./lib/runtime.ts";
 
 const origJsonParse = JSON.parse.bind(JSON);
 JSON.parse = (...args: Parameters<typeof JSON.parse>) => {
@@ -94,8 +94,10 @@ const enabledPlugins = new PluginSet(await loadAllPlugins(pluginLoader));
 const pluginContext = new PluginContext(enabledPlugins, chatHistory);
 await pluginContext.secrets.store("api.openai.com", await getApiKey());
 
-const runtime = await pluginContext.enabledPlugins.runtimes.load("default")
-  || fail("Default runtime not found\n  Available runtimes: " + pluginContext.enabledPlugins.runtimes.list().join(", "));
+console.debug(`Loaded plugins:${enabledPlugins.plugins.map((plugin) => `\n  - ${plugin.metadata.name_for_model}`).join("") || "\n  (None)"}`);
+console.debug(`Available tools:${enabledPlugins.tools.list().map((toolName) => `\n  - ${toolName}`).join("") || "\n  (None)"}`);
+
+const runtime = new ChatGPTRuntime();
 
 // Get the port number from the arguments or use the default value
 const port = (args.port || args.p || 8080) as number;
@@ -136,10 +138,6 @@ router.post("/api/chat", async (ctx) => {
 
   // FIXME: Derive a context for every request and set request-specific values there
   pluginContext.chatConfig.set("engine", engine);
-
-  if (chatHistory.getMessages().length === 0 && runtime.handleChatCreation) {
-    await runtime.handleChatCreation(pluginContext);
-  }
 
   const message = new HumanChatMessage(messageData.text);
 

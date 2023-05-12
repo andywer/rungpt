@@ -74,7 +74,6 @@ export class ChatGPTRuntime implements RuntimeImplementation {
       new ReadableStream<ChatEvent>({
         start: async (controller) => {
           try {
-
             await executor.call({ input: userMessage.text }, CallbackManager.fromHandlers({
               handleAgentAction: async (action: AgentAction) => {
                 this.debugHandleAction("Handling agent action:", action);
@@ -99,6 +98,8 @@ export class ChatGPTRuntime implements RuntimeImplementation {
           } catch (err) {
             outputTransformerWriter.close();
             console.error(err);
+            await chatHistory.finalizeMessage(responseMessageIndex);
+            await chatHistory.addError(err);
             controller.enqueue({ type: "error", data: { message: err.message } });
           }
         },

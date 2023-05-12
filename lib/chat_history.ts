@@ -14,6 +14,28 @@ export class InMemoryChatHistory implements ChatHistory {
     message: BaseChatMessage;
   }[] = [];
 
+  public addError(error: Error): Promise<number> {
+    const message = new ChatMessage(error.message, "error");
+    const messageIndex = this.messages.length;
+
+    this.messages.push({
+      actions: [],
+      createdAt: new Date(),
+      message,
+    });
+
+    this.events.emit("chat", {
+      type: "message/finalize",
+      data: {
+        messageIndex: messageIndex,
+        role: (message as ChatMessage).role as ChatRole | undefined,
+        text: message.text,
+        type: message._getType(),
+      },
+    });
+    return Promise.resolve(messageIndex);
+  }
+
   public addMessage(message: BaseChatMessage): Promise<number> {
     const messageIndex = this.messages.length;
     this.messages.push({
@@ -72,7 +94,11 @@ export class InMemoryChatHistory implements ChatHistory {
     return this.messages;
   }
 
-  public finalizeMessage(messageIndex: number, text: string, actionResult?: Record<string, unknown>): Promise<void> {
+  public finalizeMessage(
+    messageIndex: number,
+    text: string = this.messages[messageIndex].message.text,
+    actionResult?: Record<string, unknown>,
+  ): Promise<void> {
     const { actions, message } = this.messages[messageIndex];
 
     message.text = text;

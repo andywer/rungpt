@@ -7,7 +7,7 @@ import { Application, Router, send } from "https://deno.land/x/oak@v12.1.0/mod.t
 import { ChatMessage, MessageType } from "https://esm.sh/langchain/schema";
 import { HumanChatMessage } from "https://esm.sh/langchain/schema";
 import { ChatMessage as ChatMessageT, ChatRole } from "./chat.d.ts";
-import { PluginInstance, SessionContext } from "./plugins.d.ts";
+import { PluginInstance } from "./plugins.d.ts";
 import { installAction } from "./lib/actions.ts";
 import { eventStreamFromChatHistory } from "./lib/chat_history.ts";
 import { SSEEncoder } from "./lib/stream_transformers.ts";
@@ -107,8 +107,7 @@ console.log(`HTTP server is running on http://localhost:${port}/`);
 const app = new Application();
 const router = new Router();
 
-// FIXME: Very hacky in-memory session storage
-let session: SessionContext | undefined;
+const session = await runtime.handleChatCreation(pluginContext);
 
 router.get("/api/chat", (ctx) => {
   const messageHistory = session ? session.chatHistory.getMessages() : [];
@@ -144,10 +143,6 @@ router.post("/api/chat", async (ctx) => {
   const body = await ctx.request.body({ type: "json" }).value;
   const engine = body.engine as string ?? "gpt-3.5-turbo";
   const messageData = body.message as { text: string, type: MessageType } ?? ctx.throw(400, "Missing body parameter: messages");
-
-  if (!session) {
-    session = await runtime.handleChatCreation(pluginContext);
-  }
 
   session.chatConfig.set("engine", engine);
 

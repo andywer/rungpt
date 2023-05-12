@@ -23,8 +23,10 @@ type ChatHistoryEvents = {
 export interface ChatHistory {
   readonly events: EventEmitter<ChatHistoryEvents>;
   addAction(messageIndex: number, action: AgentAction): Promise<number>;
+  addError(error: Error): Promise<number>;
   addMessage(message: BaseChatMessage): Promise<number>;
   appendToMessage(messageIndex: number, append: string): Promise<void>;
+  finalizeMessage(messageIndex: number): Promise<void>;
   finalizeMessage(messageIndex: number, text: string, actionResult?: Record<string, unknown>): Promise<void>;
   getMessages(): { actions: ChatMessage["actions"], createdAt: Date, message: BaseChatMessage }[];
   messageExists(messageIndex: number): boolean;

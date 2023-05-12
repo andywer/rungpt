@@ -1,9 +1,8 @@
 import { debug } from "https://deno.land/x/debug@0.2.0/mod.ts";
-import { AgentExecutor, initializeAgentExecutorWithOptions } from "https://esm.sh/v118/langchain@0.0.67/agents";
+import { initializeAgentExecutorWithOptions } from "https://esm.sh/v118/langchain@0.0.67/agents";
 import { ChatOpenAI } from "https://esm.sh/v118/langchain@0.0.67/chat_models/openai";
 import { CallbackManager } from "https://esm.sh/v118/langchain@0.0.67/dist/callbacks/manager.js";
 import { BufferMemory, ChatMessageHistory } from "https://esm.sh/v118/langchain@0.0.67/memory.js";
-import { Tool } from "https://esm.sh/v118/langchain@0.0.67/tools.js";
 import { AIChatMessage, AgentAction, AgentFinish, BaseChatMessage } from "https://esm.sh/langchain/schema";
 import { ChatEvent } from "../chat_events.d.ts";
 import { PluginContext, RuntimeImplementation, SessionContext } from "../plugins.d.ts";
@@ -18,14 +17,19 @@ export class ChatGPTRuntime implements RuntimeImplementation {
     temperature: 0,
   });
 
-  private executor: AgentExecutor | undefined;
-
   async handleChatCreation(context: PluginContext): Promise<SessionContext> {
     const chatConfig = new Map<string, string>();
 
     const chatHistory = new InMemoryChatHistory();
     const tools = await context.enabledPlugins.tools.loadAll();
-    const executor = await this.getExecutor(tools);
+
+    const executor = await initializeAgentExecutorWithOptions(
+      tools,
+      this.model,
+      {
+        agentType: "chat-conversational-react-description",
+      }
+    );
 
     const memory = new BufferMemory({
       chatHistory: new ChatMessageHistory(
@@ -106,19 +110,6 @@ export class ChatGPTRuntime implements RuntimeImplementation {
       });
 
     return messageChatEventStream;
-  }
-
-  private async getExecutor(tools: Tool[]): Promise<AgentExecutor> {
-    if (!this.executor) {
-      this.executor = await initializeAgentExecutorWithOptions(
-        tools,
-        this.model,
-        {
-          agentType: "chat-conversational-react-description",
-        }
-      );
-    }
-    return this.executor;
   }
 }
 

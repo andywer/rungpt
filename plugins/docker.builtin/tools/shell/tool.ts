@@ -1,3 +1,4 @@
+import { debug } from "https://deno.land/x/debug@0.2.0/mod.ts";
 import { Tool } from "https://esm.sh/v118/langchain@0.0.67/tools";
 import { ActionContainer, createActionContainer, getExistingActionContainer } from "../../lib/docker_manager.ts";
 import { PluginContext } from "../../../../plugins.d.ts";
@@ -7,6 +8,9 @@ class ShellTool extends Tool {
   public readonly name = "shell";
   public readonly description = "Useful to execute linux shell commands with access to the filesystem and the internet. The input to this tool should be a valid shell command.";
 
+  private debugInvocation = debug("rungpt:tools:shell:invocation");
+  private debugOutput = debug("rungpt:tools:shell:output");
+
   public constructor(
     private container: ActionContainer,
   ) {
@@ -14,6 +18,8 @@ class ShellTool extends Tool {
   }
 
   public _call(command: string): Promise<string> {
+    this.debugInvocation(command);
+
     return this.container.actions.invokeShell(command, async (process) => {
       let output = "";
       let read: ReadableStreamDefaultReadResult<string>;
@@ -22,6 +28,8 @@ class ShellTool extends Tool {
       while (!(read = await reader.read()).done) {
         output += read.value;
       }
+
+      this.debugOutput(output);
       return output;
     });
   }

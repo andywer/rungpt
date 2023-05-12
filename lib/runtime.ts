@@ -1,12 +1,17 @@
+import { debug } from "https://deno.land/x/debug@0.2.0/mod.ts";
 import { AgentExecutor, initializeAgentExecutorWithOptions } from "https://esm.sh/v118/langchain@0.0.67/agents";
 import { ChatOpenAI } from "https://esm.sh/v118/langchain@0.0.67/chat_models/openai";
 import { CallbackManager } from "https://esm.sh/v118/langchain@0.0.67/dist/callbacks/manager.js";
+import { BufferMemory, ChatMessageHistory } from "https://esm.sh/v118/langchain@0.0.67/memory.js";
 import { Tool } from "https://esm.sh/v118/langchain@0.0.67/tools.js";
 import { AIChatMessage, AgentAction, AgentFinish, BaseChatMessage } from "https://esm.sh/langchain/schema";
 import { ChatEvent } from "../chat_events.d.ts";
 import { PluginContext, RuntimeImplementation } from "../plugins.d.ts";
 
 export class ChatGPTRuntime implements RuntimeImplementation {
+  private debugHandleAction = debug("rungpt:handleUserMessage:action");
+  private debugHandleUserMessage = debug("rungpt:handleUserMessage");
+
   private model = new ChatOpenAI({
     streaming: true,
     temperature: 0,
@@ -15,6 +20,8 @@ export class ChatGPTRuntime implements RuntimeImplementation {
   private executor: AgentExecutor | undefined;
 
   async handleUserMessage(userMessage: BaseChatMessage, context: PluginContext) {
+    this.debugHandleUserMessage("Processing user message", userMessage);
+
     const { chatHistory } = context;
     const tools = await context.enabledPlugins.tools.loadAll();
 
@@ -43,11 +50,21 @@ export class ChatGPTRuntime implements RuntimeImplementation {
         start: async (controller) => {
           try {
             const executor = await this.getExecutor(tools);
+            const memory = new BufferMemory({
+              chatHistory: new ChatMessageHistory(chatHistory.getMessages().map(({ message }) => message)),
+              memoryKey: "chat_history",
+              returnMessages: true,
+            });
+            executor.memory = memory;
+
             await executor.call({ input: userMessage.text }, CallbackManager.fromHandlers({
-              async handleAgentAction(action: AgentAction) {
+              handleAgentAction: async (action: AgentAction) => {
+                this.debugHandleAction("Handling agent action:", action);
                 await chatHistory.addAction(responseMessageIndex, action);
               },
-              async handleAgentEnd(result: AgentFinish) {
+              handleAgentEnd: async (result: AgentFinish) => {
+                this.debugHandleAction("End of agent action:", result);
+
                 const prevActions = chatHistory.getMessages()[responseMessageIndex].actions;
                 const lastActionIndex = prevActions.length - 1;
                 await chatHistory.setActionResults(responseMessageIndex, lastActionIndex, result.returnValues);

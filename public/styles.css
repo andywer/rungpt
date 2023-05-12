@@ -111,7 +111,7 @@ h1 {
 .actions {
     list-style-type: none;
     padding: 0;
-    margin: 0 0 1em;
+    margin: 0;
 }
 
 .action {
@@ -121,6 +121,10 @@ h1 {
     background-color: #eef2f5;
     border-radius: 5px;
     margin-bottom: 0.5em;
+}
+
+.action:last-child {
+    margin-bottom: 1em;
 }
 
 .tool {
@@ -136,7 +140,7 @@ h1 {
 
 .content .spinner {
     align-self: center;
-    margin: -1em 0 1em;
+    margin: 0 0 1em;
 }
 
 .content:not(.loading) .spinner {

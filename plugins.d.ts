@@ -1,3 +1,5 @@
+import { AgentExecutor } from "https://esm.sh/v118/langchain@0.0.67/agents.js";
+import { BufferMemoryInput } from "https://esm.sh/v118/langchain@0.0.67/memory.js";
 import { AgentAction, BaseChatMessage } from "https://esm.sh/langchain/schema";
 import { BaseLanguageModel } from "https://esm.sh/v118/langchain@0.0.67/base_language";
 import { Tool } from "https://esm.sh/v118/langchain@0.0.67/tools";
@@ -12,14 +14,6 @@ export interface PluginMetadata {
   description_for_human: string;
   description_for_model: string;
   logo_url: string;
-}
-
-export interface TagMetadata {
-  schema_version: string;
-  name_for_human: string;
-  name_for_model: string;
-  description_for_human: string;
-  description_for_model: string;
 }
 
 type ChatHistoryEvents = {
@@ -69,10 +63,15 @@ export interface PluginProvision<T> {
 }
 
 export interface PluginContext {
-  chatConfig: Map<"engine" | string, string>;
-  chatHistory: ChatHistory;
   enabledPlugins: PluginSet;
   secrets: SecretsStore;
+}
+
+export interface SessionContext extends PluginContext {
+  chatConfig: Map<"engine" | string, string>;
+  chatHistory: ChatHistory;
+  executor: AgentExecutor;
+  memory: BufferMemoryInput;
 }
 
 export type ParameterType = string | number | boolean;
@@ -101,6 +100,6 @@ export interface ParsedCodeBlockTag {
  * immediately sent to the AI.
  */
 export interface RuntimeImplementation {
-  handleChatCreation?(context: PluginContext): Promise<void>;
-  handleUserMessage(message: BaseChatMessage, context: PluginContext): Promise<ReadableStream<ChatEvent>> | ReadableStream<ChatEvent>;
+  handleChatCreation(context: PluginContext): Promise<SessionContext>;
+  handleUserMessage(message: BaseChatMessage, session: SessionContext): Promise<ReadableStream<ChatEvent>> | ReadableStream<ChatEvent>;
 }

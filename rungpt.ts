@@ -2,13 +2,14 @@
 import "https://deno.land/std@0.184.0/dotenv/load.ts";
 import { parse } from "https://deno.land/std@0.184.0/flags/mod.ts";
 import { JsonStringifyStream } from "https://deno.land/std@0.184.0/json/mod.ts";
+import { readableStreamFromIterable } from "https://deno.land/std@0.184.0/streams/readable_stream_from_iterable.ts";
 import { Application, Router, send } from "https://deno.land/x/oak@v12.1.0/mod.ts";
 import { ChatMessage, MessageType } from "https://esm.sh/langchain/schema";
 import { HumanChatMessage } from "https://esm.sh/langchain/schema";
 import { ChatMessage as ChatMessageT, ChatRole } from "./chat.d.ts";
-import { PluginInstance } from "./plugins.d.ts";
+import { PluginInstance, SessionContext } from "./plugins.d.ts";
 import { installAction } from "./lib/actions.ts";
-import { InMemoryChatHistory, eventStreamFromChatHistory } from "./lib/chat_history.ts";
+import { eventStreamFromChatHistory } from "./lib/chat_history.ts";
 import { SSEEncoder } from "./lib/stream_transformers.ts";
 import { PluginContext, PluginSet } from "./lib/plugins.ts";
 import { PluginLoader } from "./lib/plugin_loader.ts";
@@ -75,8 +76,7 @@ if (args.install) {
   Deno.exit(0);
 }
 
-const chatHistory = new InMemoryChatHistory();
-const loaderContext = new PluginContext(new PluginSet([]), chatHistory);
+const loaderContext = new PluginContext(new PluginSet([]));
 
 const loadAllPlugins = async (loader: PluginLoader): Promise<PluginInstance[]> => {
   const plugins: PluginInstance[] = [];
@@ -91,7 +91,7 @@ pluginLoader.events.on("plugin/discovered", (path) => console.debug(`Plugin disc
 pluginLoader.events.on("plugin/loaded", (plugin) => console.debug(`Plugin ${plugin.metadata.name_for_model} loaded.`));
 const enabledPlugins = new PluginSet(await loadAllPlugins(pluginLoader));
 
-const pluginContext = new PluginContext(enabledPlugins, chatHistory);
+const pluginContext = new PluginContext(enabledPlugins);
 await pluginContext.secrets.store("api.openai.com", await getApiKey());
 
 console.debug(`Loaded plugins:${enabledPlugins.plugins.map((plugin) => `\n  - ${plugin.metadata.name_for_model}`).join("") || "\n  (None)"}`);
@@ -107,8 +107,13 @@ console.log(`HTTP server is running on http://localhost:${port}/`);
 const app = new Application();
 const router = new Router();
 
+// FIXME: Very hacky in-memory session storage
+let session: SessionContext | undefined;
+
 router.get("/api/chat", (ctx) => {
-  ctx.response.body = chatHistory.getMessages()
+  const messageHistory = session ? session.chatHistory.getMessages() : [];
+
+  ctx.response.body = messageHistory
     .map(({ actions, createdAt, message }): ChatMessageT => ({
       actions,
       createdAt: createdAt.toISOString(),
@@ -121,7 +126,11 @@ router.get("/api/chat", (ctx) => {
 });
 
 router.get("/api/chat/events", (ctx) => {
-  const output = eventStreamFromChatHistory(chatHistory)
+  const stream = session
+    ? eventStreamFromChatHistory(session.chatHistory)
+    : readableStreamFromIterable([]);
+
+  const output = stream
     .pipeThrough(new JsonStringifyStream())
     .pipeThrough(SSEEncoder());
 
@@ -136,15 +145,18 @@ router.post("/api/chat", async (ctx) => {
   const engine = body.engine as string ?? "gpt-3.5-turbo";
   const messageData = body.message as { text: string, type: MessageType } ?? ctx.throw(400, "Missing body parameter: messages");
 
-  // FIXME: Derive a context for every request and set request-specific values there
-  pluginContext.chatConfig.set("engine", engine);
+  if (!session) {
+    session = await runtime.handleChatCreation(pluginContext);
+  }
+
+  session.chatConfig.set("engine", engine);
 
   const message = new HumanChatMessage(messageData.text);
 
   ctx.response.status = 200;
   ctx.response.headers.set("Cache-Control", "no-cache");
   ctx.response.headers.set("Content-Type", "text/event-stream");
-  ctx.response.body = (await runtime.handleUserMessage(message, pluginContext))!
+  ctx.response.body = (await runtime.handleUserMessage(message, session))!
     .pipeThrough(new JsonStringifyStream())
     .pipeThrough(SSEEncoder());
 });

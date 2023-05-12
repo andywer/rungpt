@@ -6,7 +6,8 @@ import { BufferMemory, ChatMessageHistory } from "https://esm.sh/v118/langchain@
 import { Tool } from "https://esm.sh/v118/langchain@0.0.67/tools.js";
 import { AIChatMessage, AgentAction, AgentFinish, BaseChatMessage } from "https://esm.sh/langchain/schema";
 import { ChatEvent } from "../chat_events.d.ts";
-import { PluginContext, RuntimeImplementation } from "../plugins.d.ts";
+import { PluginContext, RuntimeImplementation, SessionContext } from "../plugins.d.ts";
+import { InMemoryChatHistory } from "./chat_history.ts";
 
 export class ChatGPTRuntime implements RuntimeImplementation {
   private debugHandleAction = debug("rungpt:handleUserMessage:action");
@@ -19,12 +20,36 @@ export class ChatGPTRuntime implements RuntimeImplementation {
 
   private executor: AgentExecutor | undefined;
 
-  async handleUserMessage(userMessage: BaseChatMessage, context: PluginContext) {
+  async handleChatCreation(context: PluginContext): Promise<SessionContext> {
+    const chatConfig = new Map<string, string>();
+
+    const chatHistory = new InMemoryChatHistory();
+    const tools = await context.enabledPlugins.tools.loadAll();
+    const executor = await this.getExecutor(tools);
+
+    const memory = new BufferMemory({
+      chatHistory: new ChatMessageHistory(
+        chatHistory.getMessages().map(({ message }) => message)
+      ),
+      memoryKey: "chat_history",
+      returnMessages: true,
+    });
+
+    executor.memory = memory;
+
+    return {
+      ...context,
+      chatConfig,
+      chatHistory,
+      executor,
+      memory,
+    };
+  }
+
+  async handleUserMessage(userMessage: BaseChatMessage, session: SessionContext) {
     this.debugHandleUserMessage("Processing user message", userMessage);
 
-    const { chatHistory } = context;
-    const tools = await context.enabledPlugins.tools.loadAll();
-
+    const { chatHistory, executor } = session;
     await chatHistory.addMessage(userMessage);
 
     const responseMessage = new AIChatMessage("");
@@ -49,13 +74,6 @@ export class ChatGPTRuntime implements RuntimeImplementation {
       new ReadableStream<ChatEvent>({
         start: async (controller) => {
           try {
-            const executor = await this.getExecutor(tools);
-            const memory = new BufferMemory({
-              chatHistory: new ChatMessageHistory(chatHistory.getMessages().map(({ message }) => message)),
-              memoryKey: "chat_history",
-              returnMessages: true,
-            });
-            executor.memory = memory;
 
             await executor.call({ input: userMessage.text }, CallbackManager.fromHandlers({
               handleAgentAction: async (action: AgentAction) => {

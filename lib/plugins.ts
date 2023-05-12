@@ -1,6 +1,5 @@
 import { fail } from "https://deno.land/std@0.184.0/testing/asserts.ts";
 import {
-  ChatHistory,
   PluginContext as PluginContextT,
   PluginInstance,
   PluginProvision,
@@ -33,10 +32,8 @@ export class SecretsStore implements SecretsStoreT {
 export class PluginContext implements PluginContextT {
   constructor(
     public readonly enabledPlugins: PluginSetT,
-    public readonly chatHistory: ChatHistory,
   ) { }
 
-  chatConfig = new Map<string,string>();
   secrets = new SecretsStore();
 }
 

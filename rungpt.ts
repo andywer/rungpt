@@ -15,16 +15,6 @@ import { PluginContext, PluginSet } from "./lib/plugins.ts";
 import { PluginLoader } from "./lib/plugin_loader.ts";
 import { ChatGPTRuntime } from "./lib/runtime.ts";
 
-const origJsonParse = JSON.parse.bind(JSON);
-JSON.parse = (...args: Parameters<typeof JSON.parse>) => {
-  try {
-    return origJsonParse(...args);
-  } catch (err) {
-    err.message = `${err.message}\nSource: ${args[0]}`;
-    throw err;
-  }
-};
-
 const appUrl = new URL(import.meta.url);
 const appPath = await Deno.realPath(new URL(".", appUrl).pathname);
 const pluginsDir = `${appPath}/plugins`;

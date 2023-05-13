@@ -4,6 +4,10 @@ import { ActionContainer, createActionContainer, getExistingActionContainer } fr
 import { PluginContext } from "../../../../plugins.d.ts";
 import { streamExecutedCommand } from "../../lib/streams.ts";
 
+const appUrl = new URL(import.meta.url);
+const appPath = await Deno.realPath(new URL("../../../..", appUrl).pathname);
+const sharedDir = `${appPath}/shared`;
+
 class ShellTool extends Tool {
   public readonly name = "shell";
   public readonly description = "Useful to execute linux shell commands with access to the filesystem and the internet. The input to this tool should be a valid shell command.";
@@ -36,6 +40,9 @@ class ShellTool extends Tool {
 }
 
 export default async (_context: PluginContext) => {
-  const container = await getExistingActionContainer() ?? await createActionContainer("rungpt_actions:latest", Deno.cwd());
+  const container = await getExistingActionContainer()
+    ?? await createActionContainer("rungpt_actions:latest", {
+      Binds: [`${sharedDir}:/shared`],
+    });
   return new ShellTool(container);
 };

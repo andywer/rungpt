@@ -25,7 +25,7 @@ function withActionContainer(fn: (actionContainer: ActionContainer, t: Deno.Test
   return async (t: Deno.TestContext) => {
     let actionContainer = await getExistingActionContainer();
     if (!actionContainer) {
-      actionContainer = await createActionContainer(dockerImageName, actionsDir);
+      actionContainer = await createActionContainer(dockerImageName);
     }
     if (!await actionContainer.running()) {
       await actionContainer.start();

@@ -1,10 +1,10 @@
 import { fail } from "https://deno.land/std@0.184.0/testing/asserts.ts";
 import Docker from "https://deno.land/x/denocker@v0.2.1/index.ts";
+import { HostConfig } from "https://deno.land/x/denocker@v0.2.1/lib/types/container/container.ts";
 
 type ActionProcess = Deno.Process<{ cmd: string[], stderr: "piped", stdin: "piped", stdout: "piped" }>;
 
 const actionsContainerName = "rungpt-actions";
-const actionsMountTarget = "/actions/installed";
 
 const dockerSocket = await tryFiles([
   `/var/run/docker.sock`,
@@ -90,24 +90,24 @@ export class ActionContainer {
 
 export async function createActionContainer(
   image: string,
-  actionsHostPath: string,
+  hostConfig?: HostConfig & { Binds?: `${string}:${string}`[] },
 ): Promise<ActionContainer> {
   const name = actionsContainerName;
   const container = await docker.containers.create(name, {
     Image: image,
     Hostname: name,
     HostConfig: {
-      Binds: [`${actionsHostPath}:${actionsMountTarget}`],
       RestartPolicy: {
         Name: "on-failure",
       },
+      ...hostConfig,
     // deno-lint-ignore no-explicit-any
     } as any,
     StopTimeout: 1,
   });
 
   if (!container.Id) {
-    throw new Error(`Failed to create actions container '${name}' using image '${image}' with mount point '${actionsHostPath}': ${container.message}`);
+    throw new Error(`Failed to create actions container '${name}' using image '${image}': ${container.message}`);
   }
 
   return (await getExistingActionContainer()) || fail(`Failed to retrieve newly created actions container '${name}' with ID '${container.Id}'`);

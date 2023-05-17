@@ -40,8 +40,9 @@ class ShellTool extends Tool {
 }
 
 export default async (_context: PluginContext) => {
+  const dockerImage = Deno.env.get("RUNGPT_DOCKER_IMAGE") || "rungpt_actions:latest";
   const container = await getExistingActionContainer()
-    ?? await createActionContainer("rungpt_actions:latest", {
+    ?? await createActionContainer(dockerImage, {
       Binds: [`${sharedDir}:/shared`],
     });
   return new ShellTool(container);

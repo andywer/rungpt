@@ -1,11 +1,12 @@
-import { AgentExecutor } from "https://esm.sh/v118/langchain@0.0.67/agents.js";
-import { BufferMemoryInput } from "https://esm.sh/v118/langchain@0.0.67/memory.js";
+import { BaseChain } from "https://esm.sh/v118/langchain@0.0.75/chains";
+import { BufferMemoryInput } from "https://esm.sh/v118/langchain@0.0.75/memory.js";
 import { AgentAction, BaseChatMessage } from "https://esm.sh/langchain/schema";
-import { BaseLanguageModel } from "https://esm.sh/v118/langchain@0.0.67/base_language";
-import { Tool } from "https://esm.sh/v118/langchain@0.0.67/tools";
+import { BaseLanguageModel } from "https://esm.sh/v118/langchain@0.0.75/base_language";
+import { Tool } from "https://esm.sh/v118/langchain@0.0.75/tools";
 import { EventEmitter } from "https://deno.land/x/event@2.0.1/mod.ts";
 import { ChatEvent } from "./chat_events.d.ts";
 import { ChatMessage } from "./chat.d.ts";
+import { RecursivePlanExecuteAgentExecutor } from "./lib/recursive_plan_execute/index.ts";
 
 export interface PluginMetadata {
   schema_version: string;
@@ -72,7 +73,7 @@ export interface PluginContext {
 export interface SessionContext extends PluginContext {
   chatConfig: Map<"engine" | string, string>;
   chatHistory: ChatHistory;
-  executor: AgentExecutor;
+  executor: BaseChain | RecursivePlanExecuteAgentExecutor;
   memory: BufferMemoryInput;
 }
 

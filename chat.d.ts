@@ -1,4 +1,4 @@
-import { MessageType } from "https://esm.sh/v118/langchain@0.0.67/schema.js";
+import { MessageType } from "https://esm.sh/v118/langchain@0.0.75/schema.js";
 
 export {
   MessageType,

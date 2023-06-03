@@ -7,8 +7,8 @@ import {
   RuntimeImplementation,
   SecretsStore as SecretsStoreT,
 } from "../plugins.d.ts";
-import { BaseLanguageModel } from "https://esm.sh/v118/langchain@0.0.67/dist/base_language/index.js";
-import { Tool } from "https://esm.sh/v118/langchain@0.0.67/dist/tools/index.js";
+import { BaseLanguageModel } from "https://esm.sh/v118/langchain@0.0.75/dist/base_language/index.js";
+import { Tool } from "https://esm.sh/v118/langchain@0.0.75/dist/tools/index.js";
 
 export class SecretsStore implements SecretsStoreT {
   #secrets = new Map<string, string>();

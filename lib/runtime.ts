@@ -1,21 +1,24 @@
 import { debug } from "https://deno.land/x/debug@0.2.0/mod.ts";
-import { initializeAgentExecutorWithOptions } from "https://esm.sh/v118/langchain@0.0.67/agents";
-import { ChatOpenAI } from "https://esm.sh/v118/langchain@0.0.67/chat_models/openai";
-import { CallbackManager } from "https://esm.sh/v118/langchain@0.0.67/dist/callbacks/manager.js";
-import { BufferMemory, ChatMessageHistory } from "https://esm.sh/v118/langchain@0.0.67/memory.js";
+import { CallbackManager } from "https://esm.sh/v118/langchain@0.0.75/callbacks";
+import { ChatOpenAI } from "https://esm.sh/v118/langchain@0.0.75/chat_models/openai";
+import { OpenAI } from "https://esm.sh/v118/langchain@0.0.75/llms";
+import { BufferMemory, ChatMessageHistory } from "https://esm.sh/v118/langchain@0.0.75/memory.js";
 import { AIChatMessage, AgentAction, AgentFinish, BaseChatMessage } from "https://esm.sh/langchain/schema";
 import { ChatEvent } from "../chat_events.d.ts";
 import { PluginContext, RuntimeImplementation, SessionContext } from "../plugins.d.ts";
 import { InMemoryChatHistory } from "./chat_history.ts";
+import type { PromptLogItem, PromptLogger } from "./prompt_logger.ts";
+import { RecursivePlanExecuteAgentExecutor } from "./recursive_plan_execute/index.ts";
 
 export class ChatGPTRuntime implements RuntimeImplementation {
   private debugHandleAction = debug("rungpt:handleUserMessage:action");
   private debugHandleUserMessage = debug("rungpt:handleUserMessage");
 
-  private model = new ChatOpenAI({
-    streaming: true,
-    temperature: 0,
-  });
+  private logByRunId = new Map<string, PromptLogItem>();
+
+  constructor(
+    private promptLogger: PromptLogger,
+  ) {}
 
   async handleChatCreation(context: PluginContext): Promise<SessionContext> {
     const chatConfig = new Map<string, string>();
@@ -23,13 +26,21 @@ export class ChatGPTRuntime implements RuntimeImplementation {
     const chatHistory = new InMemoryChatHistory();
     const tools = await context.enabledPlugins.tools.loadAll();
 
-    const executor = await initializeAgentExecutorWithOptions(
+    const chatLLM = new ChatOpenAI({
+      streaming: true,
+      temperature: 0,
+    });
+
+    const llm = new OpenAI({
+      streaming: true,
+      temperature: 0,
+    });
+
+    const executor = RecursivePlanExecuteAgentExecutor.fromToolsAndLLMs({
+      executionLLM: chatLLM,
+      planningLLM: llm,
       tools,
-      this.model,
-      {
-        agentType: "chat-conversational-react-description",
-      }
-    );
+    });
 
     const memory = new BufferMemory({
       chatHistory: new ChatMessageHistory(
@@ -56,8 +67,8 @@ export class ChatGPTRuntime implements RuntimeImplementation {
     const { chatHistory, executor } = session;
     await chatHistory.addMessage(userMessage);
 
-    const responseMessage = new AIChatMessage("");
-    const responseMessageIndex = await chatHistory.addMessage(responseMessage);
+    let responseMessage: BaseChatMessage;
+    let responseMessageIndex = -1;
 
     const outputTransformer = new TransformStream();
     const outputTransformerWriter = outputTransformer.writable.getWriter();
@@ -90,13 +101,49 @@ export class ChatGPTRuntime implements RuntimeImplementation {
                 const lastActionIndex = prevActions.length - 1;
                 await chatHistory.setActionResults(responseMessageIndex, lastActionIndex, result.returnValues);
 
-                if (typeof result.returnValues.output === "string") {
-                  await chatHistory.finalizeMessage(responseMessageIndex, result.returnValues.output, result.returnValues);
-                  outputTransformerWriter.close();
+                // if (typeof result.returnValues.output === "string") {
+                //   await chatHistory.finalizeMessage(responseMessageIndex, result.returnValues.output, result.returnValues);
+                //   if (!outputTransformerWriter.closed) {
+                //     outputTransformerWriter.close();
+                //   }
+                // }
+              },
+              handleChainStart: async (_chain, _inputs) => {
+                responseMessage = new AIChatMessage("");
+                responseMessageIndex = await chatHistory.addMessage(responseMessage);
+              },
+              handleChainEnd: async (outputs) => {
+                const text = typeof outputs.output === "string"
+                  ? outputs.output
+                  : JSON.stringify(outputs.output, null, 2);
+                await chatHistory.finalizeMessage(responseMessageIndex, text, outputs);
+                // if (!outputTransformerWriter.closed) {
+                //   outputTransformerWriter.close();
+                // }
+              },
+              handleLLMStart: (llm, prompts, runId) => {
+                const prompt = prompts.join("\n\n");
+                const logItem = this.promptLogger.logPrompt(llm.name, prompt);
+                this.logByRunId.set(runId, logItem);
+              },
+              handleLLMEnd: (output, runId) => {
+                const logItem = this.logByRunId.get(runId);
+                if (logItem) {
+                  logItem.logResponse(output.generations.map((gens) => gens.map((gen) => gen.text).join("\n\n")).join("\n\n\n"));
+                  this.logByRunId.delete(runId);
+                }
+              },
+              handleLLMError: (error, runId) => {
+                const logItem = this.logByRunId.get(runId);
+                if (logItem) {
+                  logItem.logError(error?.message ?? JSON.stringify(error, null, 2));
+                  this.logByRunId.delete(runId);
                 }
               },
               handleLLMNewToken(token) {
-                outputTransformerWriter.write(token);
+                if (!outputTransformerWriter.closed) {
+                  outputTransformerWriter.write(token);
+                }
               },
             }));
           } catch (err) {

@@ -1,5 +1,5 @@
 import { debug } from "https://deno.land/x/debug@0.2.0/mod.ts";
-import { Tool } from "https://esm.sh/v118/langchain@0.0.67/tools";
+import { Tool } from "https://esm.sh/v118/langchain@0.0.75/tools";
 import { ActionContainer, createActionContainer, getExistingActionContainer } from "../../lib/docker_manager.ts";
 import { PluginContext } from "../../../../plugins.d.ts";
 import { streamExecutedCommand } from "../../lib/streams.ts";

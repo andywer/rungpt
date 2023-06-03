@@ -14,6 +14,7 @@ import { SSEEncoder } from "./lib/stream_transformers.ts";
 import { PluginContext, PluginSet } from "./lib/plugins.ts";
 import { PluginLoader } from "./lib/plugin_loader.ts";
 import { ChatGPTRuntime } from "./lib/runtime.ts";
+import { PromptLogger } from "./lib/prompt_logger.ts";
 
 const appUrl = new URL(import.meta.url);
 const appPath = await Deno.realPath(new URL(".", appUrl).pathname);
@@ -87,7 +88,8 @@ await pluginContext.secrets.store("api.openai.com", await getApiKey());
 console.debug(`Loaded plugins:${enabledPlugins.plugins.map((plugin) => `\n  - ${plugin.metadata.name_for_model}`).join("") || "\n  (None)"}`);
 console.debug(`Available tools:${enabledPlugins.tools.list().map((toolName) => `\n  - ${toolName}`).join("") || "\n  (None)"}`);
 
-const runtime = new ChatGPTRuntime();
+const promptLogger = new PromptLogger(`${appPath}/logs/prompts`);
+const runtime = new ChatGPTRuntime(promptLogger);
 
 // Get the port number from the arguments or use the default value
 const port = (args.port || args.p || 8080) as number;

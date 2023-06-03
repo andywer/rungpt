@@ -6,7 +6,7 @@ import {
   PluginSet as PluginSetT,
   RuntimeImplementation,
   SecretsStore as SecretsStoreT,
-} from "../plugins.d.ts";
+} from "../types/plugins.d.ts";
 import { BaseLanguageModel } from "https://esm.sh/v118/langchain@0.0.67/dist/base_language/index.js";
 import { Tool } from "https://esm.sh/v118/langchain@0.0.67/dist/tools/index.js";
 

@@ -6,8 +6,8 @@ import { readableStreamFromIterable } from "https://deno.land/std@0.184.0/stream
 import { Application, Router, send } from "https://deno.land/x/oak@v12.1.0/mod.ts";
 import { ChatMessage, MessageType } from "https://esm.sh/langchain/schema";
 import { HumanChatMessage } from "https://esm.sh/langchain/schema";
-import { ChatMessage as ChatMessageT, ChatRole } from "./chat.d.ts";
-import { PluginInstance } from "./plugins.d.ts";
+import { ChatMessage as ChatMessageT, ChatRole } from "./types/chat.d.ts";
+import { PluginInstance } from "./types/plugins.d.ts";
 import { installAction } from "./lib/actions.ts";
 import { eventStreamFromChatHistory } from "./lib/chat_history.ts";
 import { SSEEncoder } from "./lib/stream_transformers.ts";

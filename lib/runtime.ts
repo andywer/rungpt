@@ -4,8 +4,8 @@ import { ChatOpenAI } from "https://esm.sh/v118/langchain@0.0.67/chat_models/ope
 import { CallbackManager } from "https://esm.sh/v118/langchain@0.0.67/dist/callbacks/manager.js";
 import { BufferMemory, ChatMessageHistory } from "https://esm.sh/v118/langchain@0.0.67/memory.js";
 import { AIChatMessage, AgentAction, AgentFinish, BaseChatMessage } from "https://esm.sh/langchain/schema";
-import { ChatEvent } from "../chat_events.d.ts";
-import { PluginContext, RuntimeImplementation, SessionContext } from "../plugins.d.ts";
+import { ChatEvent } from "../types/chat_events.d.ts";
+import { PluginContext, RuntimeImplementation, SessionContext } from "../types/plugins.d.ts";
 import { InMemoryChatHistory } from "./chat_history.ts";
 
 export class ChatGPTRuntime implements RuntimeImplementation {

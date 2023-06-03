@@ -1,6 +1,6 @@
 import * as path from "https://deno.land/std@0.184.0/path/mod.ts";
 import { EventEmitter } from "https://deno.land/x/event@2.0.1/mod.ts";
-import { PluginInstance, PluginProvision, RuntimeImplementation } from "../plugins.d.ts";
+import { PluginInstance, PluginProvision, RuntimeImplementation } from "../types/plugins.d.ts";
 import { PluginContext } from "./plugins.ts";
 import { BaseLanguageModel } from "https://esm.sh/v118/langchain@0.0.67/base_language.js";
 import { Tool } from "https://esm.sh/v118/langchain@0.0.67/tools.js";

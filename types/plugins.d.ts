@@ -1,22 +1,22 @@
-import { AgentExecutor } from "https://esm.sh/v118/langchain@0.0.67/agents.js";
-import { BufferMemoryInput } from "https://esm.sh/v118/langchain@0.0.67/memory.js";
 import { AgentAction, BaseChatMessage } from "https://esm.sh/langchain/schema";
 import { BaseLanguageModel } from "https://esm.sh/v118/langchain@0.0.67/base_language";
 import { Tool } from "https://esm.sh/v118/langchain@0.0.67/tools";
 import { EventEmitter } from "https://deno.land/x/event@2.0.1/mod.ts";
 import { ChatEvent } from "./chat_events.d.ts";
 import { ChatMessage } from "./chat.d.ts";
+import { SecretsStore, SessionController } from "./session.d.ts";
+
+export {
+  SessionController,
+};
 
 export interface PluginMetadata {
   schema_version: string;
-  name_for_human: string;
-  name_for_model: string;
-  description_for_human: string;
-  description_for_model: string;
-  logo_url: string;
+  name: string;
+  description: string;
 }
 
-type ChatHistoryEvents = {
+export type ChatHistoryEvents = {
   chat: [event: ChatEvent];
 };
 
@@ -38,42 +38,16 @@ export type ChatMessageRole = "briefing" | "error";
 
 export interface PluginInstance {
   readonly metadata: PluginMetadata;
-  readonly models: PluginProvision<BaseLanguageModel>;
-  readonly runtimes: PluginProvision<RuntimeImplementation>;
-  readonly tools: PluginProvision<Tool>;
-}
-
-export interface PluginSet {
-  readonly plugins: PluginInstance[];
-  readonly models: PluginProvision<BaseLanguageModel>;
-  readonly runtimes: PluginProvision<RuntimeImplementation>;
-  readonly tools: PluginProvision<Tool>;
-}
-
-export type WellKnownSecretID = "api.openai.com";
-
-export interface SecretsStore {
-  exists(secretName: WellKnownSecretID | string): Promise<boolean>;
-  read(secretName: WellKnownSecretID | string): Promise<string>;
-  store(secretName: WellKnownSecretID | string, secretData: string): Promise<void>;
-}
-
-export interface PluginProvision<T> {
-  load(name: string): Promise<T>;
-  loadAll(): Promise<T[]>;
-  list(): string[];
+  readonly controllers: Map<string, SessionController>;
+  readonly models: Map<string, BaseLanguageModel>;
+  readonly tools: Map<string, Tool>;
 }
 
 export interface PluginContext {
-  enabledPlugins: PluginSet;
   secrets: SecretsStore;
-}
-
-export interface SessionContext extends PluginContext {
-  chatConfig: Map<"engine" | string, string>;
-  chatHistory: ChatHistory;
-  executor: AgentExecutor;
-  memory: BufferMemoryInput;
+  utils: {
+    createChatHistory(): ChatHistory;
+  };
 }
 
 export type ParameterType = string | number | boolean;
@@ -91,17 +65,4 @@ export interface ParsedCodeBlockTag {
     };
     raw: string;
   }[];
-}
-
-/**
- * A runtime implementation can provide custom functionality for the
- * whole chat, not just single code blocks in messages.
- *
- * Runtime implementations can for example provide a question-answer
- * kind of dialog where messages are handled by the runtime and not
- * immediately sent to the AI.
- */
-export interface RuntimeImplementation {
-  handleChatCreation(context: PluginContext): Promise<SessionContext>;
-  handleUserMessage(message: BaseChatMessage, session: SessionContext): Promise<ReadableStream<ChatEvent>> | ReadableStream<ChatEvent>;
 }

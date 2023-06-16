@@ -1,14 +1,7 @@
 import { fail } from "https://deno.land/std@0.184.0/testing/asserts.ts";
-import {
-  PluginContext as PluginContextT,
-  PluginInstance,
-  PluginProvision,
-  PluginSet as PluginSetT,
-  RuntimeImplementation,
-  SecretsStore as SecretsStoreT,
-} from "../types/plugins.d.ts";
-import { BaseLanguageModel } from "https://esm.sh/v118/langchain@0.0.67/dist/base_language/index.js";
-import { Tool } from "https://esm.sh/v118/langchain@0.0.67/dist/tools/index.js";
+import { ChatHistory, PluginContext as PluginContextT } from "../types/plugins.d.ts";
+import { SecretsStore as SecretsStoreT } from "../types/session.d.ts";
+import { InMemoryChatHistory } from "./chat_history.ts";
 
 export class SecretsStore implements SecretsStoreT {
   #secrets = new Map<string, string>();
@@ -31,46 +24,13 @@ export class SecretsStore implements SecretsStoreT {
 
 export class PluginContext implements PluginContextT {
   constructor(
-    public readonly enabledPlugins: PluginSetT,
+    public readonly secrets: SecretsStoreT,
   ) { }
 
-  secrets = new SecretsStore();
-}
-
-export class PluginSet implements PluginSetT {
-  models = this.aggregateUtils<BaseLanguageModel>("models");
-  runtimes = this.aggregateUtils<RuntimeImplementation>("runtimes");
-  tools = this.aggregateUtils<Tool>("tools");
-
-  constructor(
-    public readonly plugins: PluginInstance[],
-  ) { }
-
-  private aggregateUtils<T, K extends "models" | "runtimes" | "tools" = "models" | "runtimes" | "tools">(key: K): PluginProvision<T> {
-    const lookup = new Map<string, PluginInstance>();
-    for (const plugin of this.plugins) {
-      for (const name of plugin[key].list()) {
-        lookup.set(name, plugin);
-      }
-    }
-    const aggregated: PluginProvision<T> = {
-      load(name: string): Promise<T> {
-        const plugin = lookup.get(name);
-        if (!plugin) {
-          return fail(`No ${key} with that name found: ${name}`);
-        }
-        return plugin[key].load(name) as Promise<T>;
-      },
-      async loadAll(): Promise<T[]> {
-        return (await Promise.all(
-          Array.from(lookup.values())
-            .map((plugin) => plugin[key].loadAll())
-        )).flat() as T[];
-      },
-      list(): string[] {
-        return Array.from(lookup.keys());
-      },
-    };
-    return aggregated;
-  }
+  public readonly utils = {
+    createChatHistory(): ChatHistory {
+      // TODO: Make this configurable
+      return new InMemoryChatHistory();
+    },
+  };
 }

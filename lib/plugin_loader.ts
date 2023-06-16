@@ -1,11 +1,11 @@
 import * as path from "https://deno.land/std@0.184.0/path/mod.ts";
 import { EventEmitter } from "https://deno.land/x/event@2.0.1/mod.ts";
-import { PluginInstance, PluginProvision, RuntimeImplementation } from "../types/plugins.d.ts";
-import { PluginContext } from "./plugins.ts";
 import { BaseLanguageModel } from "https://esm.sh/v118/langchain@0.0.67/base_language.js";
 import { Tool } from "https://esm.sh/v118/langchain@0.0.67/tools.js";
+import { PluginInstance, SessionController } from "../types/plugins.d.ts";
+import { PluginContext } from "./plugins.ts";
 
-export interface Initializer<T> {
+interface Initializer<T> {
   (ctx: PluginContext): Promise<T> | T;
 }
 
@@ -39,33 +39,31 @@ export class PluginLoader {
 
   async loadPlugin(pluginPath: string, context: PluginContext): Promise<PluginInstance> {
     const metadata = await import(`${pluginPath}/manifest.json`, { assert: { type: "json" } });
-    const [models, runtimes, tools] = await Promise.all([
+    const [controllers, models, tools] = await Promise.all([
+      this.loadPluginControllers(pluginPath, context),
       this.loadPluginModels(pluginPath, context),
-      this.loadPluginRuntimes(pluginPath, context),
       this.loadPluginTools(pluginPath, context),
     ]);
     const plugin: PluginInstance = {
       metadata: metadata.default,
+      controllers,
       models,
-      runtimes,
       tools,
     };
     this.events.emit("plugin/loaded", plugin);
     return plugin;
   }
 
-  private async loadPluginModels(pluginPath: string, context: PluginContext): Promise<PluginInstance["models"]> {
-    const initializers = await this.loadPluginModules<BaseLanguageModel>(pluginPath, "models", "model.ts");
-    return new Provision(initializers, context, () => void(0));
+  private loadPluginControllers(pluginPath: string, context: PluginContext): Promise<PluginInstance["controllers"]> {
+    return this.loadPluginModules<SessionController>(pluginPath, "controllers", context);
   }
 
-  private async loadPluginRuntimes(pluginPath: string, context: PluginContext): Promise<PluginInstance["runtimes"]> {
-    const initializers = await this.loadPluginModules<RuntimeImplementation>(pluginPath, "runtimes", "runtime.ts");
-    return new Provision(initializers, context, () => void(0));
+  private loadPluginModels(pluginPath: string, context: PluginContext): Promise<PluginInstance["models"]> {
+    return this.loadPluginModules<BaseLanguageModel>(pluginPath, "models", context);
   }
 
   private async loadPluginTools(pluginPath: string, context: PluginContext): Promise<PluginInstance["tools"]> {
-    const initializers = await this.loadPluginModules<Tool>(pluginPath, "tools", "tool.ts");
+    const loaded = await this.loadPluginModules<Tool>(pluginPath, "tools", context);
     const validate = (tool: Tool, name: string) => {
       try {
         if (!tool.name) throw new Error(`Tool name is required`);
@@ -74,13 +72,16 @@ export class PluginLoader {
         throw new Error(`Invalid tool "${name}": ${err.message}`);
       }
     };
-    return new Provision(initializers, context, validate);
+    loaded.forEach(validate);
+    return loaded;
   }
 
-  private async loadPluginModules<T>
-    (pluginPath: string, subdirName: string, moduleName: string): Promise<Map<string, Initializer<T>>>
-  {
-    const modules = new Map<string, Initializer<T>>();
+  private async loadPluginModules<T>(
+    pluginPath: string,
+    subdirName: string,
+    context: PluginContext,
+  ): Promise<Map<string, T>> {
+    const modules = new Map<string, T>();
     const modulesPath = path.join(pluginPath, subdirName);
 
     try {
@@ -90,51 +91,31 @@ export class PluginLoader {
     }
 
     for await (const dirEntry of Deno.readDir(modulesPath)) {
-      if (dirEntry.isDirectory) {
-        const modPath = path.join(modulesPath, dirEntry.name, moduleName);
+      if (dirEntry.isFile && dirEntry.name.match(/\.(js|ts)$/i) && !dirEntry.name.match(/^[\._]/)) {
+        const modPath = path.join(modulesPath, dirEntry.name);
+        const name = dirEntry.name.replace(/\.(js|ts)$/i, "");
+
         try {
           const stat = await Deno.stat(modPath);
           if (stat.isFile) {
             const mod = await import(modPath) as { default: Initializer<T> };
-            modules.set(dirEntry.name, mod.default);
+            try {
+              const loaded = await mod.default(context);
+              modules.set(name, loaded);
+            } catch (err) {
+              throw new Error(`Failed to load ${modPath}: ${err.stack || err.message}\n`);
+            }
           }
         } catch {
           continue;
         }
 
-        if (!modules.has(dirEntry.name)) {
+        if (!modules.has(name)) {
           throw new Error(`No default export in ${modPath}`);
         }
       }
     }
 
     return modules;
-  }
-}
-
-class Provision<T> implements PluginProvision<T> {
-  constructor(
-    private initializers: Map<string, (ctx: PluginContext) => Promise<T> | T>,
-    private context: PluginContext,
-    private validate: (loaded: T, name: string) => void,
-  ) {}
-
-  async load(name: string): Promise<T> {
-    const initializer = this.initializers.get(name);
-    if (!initializer) {
-      throw new Error(`No initializer for ${name}`);
-    }
-    const loaded = await initializer(this.context);
-    this.validate(loaded, name);
-    return loaded;
-  }
-
-  async loadAll(): Promise<T[]> {
-    return await Promise.all(Array.from(this.initializers.values())
-      .map((initializer) => initializer(this.context)));
-  }
-
-  list(): string[] {
-    return Array.from(this.initializers.keys());
   }
 }

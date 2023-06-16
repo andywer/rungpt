@@ -1,4 +1,7 @@
+import { AgentAction, BaseChatMessage } from "https://esm.sh/langchain/schema";
 import { MessageType } from "https://esm.sh/v118/langchain@0.0.67/schema.js";
+import { EventEmitter } from "https://deno.land/x/event@2.0.1/mod.ts";
+import { ChatEvent } from "./chat_events.d.ts";
 
 export {
   MessageType,
@@ -40,4 +43,22 @@ export interface ChatAction {
     input: string;
     results: Record<string, unknown>;
   };
+}
+
+type ChatHistoryEvents = {
+  chat: [event: ChatEvent];
+};
+
+export interface ChatHistory {
+  readonly events: EventEmitter<ChatHistoryEvents>;
+  addAction(messageIndex: number, action: AgentAction): Promise<number>;
+  addError(error: Error): Promise<number>;
+  addMessage(message: BaseChatMessage): Promise<number>;
+  appendToMessage(messageIndex: number, append: string): Promise<void>;
+  finalizeMessage(messageIndex: number): Promise<void>;
+  finalizeMessage(messageIndex: number, text: string, actionResult?: Record<string, unknown>): Promise<void>;
+  getMessages(): { actions: ChatMessage["actions"], createdAt: Date, message: BaseChatMessage }[];
+  messageExists(messageIndex: number): boolean;
+  setActionResults(messageIndex: number, actionIndex: number, results: Record<string, unknown>): Promise<void>;
+  streamMessage(message: Omit<BaseChatMessage, "text">, text: ReadableStream<string>): Promise<number>;
 }

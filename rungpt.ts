@@ -11,13 +11,15 @@ import { PluginInstance } from "./types/plugins.d.ts";
 import { installAction } from "./lib/actions.ts";
 import { eventStreamFromChatHistory } from "./lib/chat_history.ts";
 import { SSEEncoder } from "./lib/stream_transformers.ts";
-import { PluginContext, PluginSet } from "./lib/plugins.ts";
+import { PluginContext, SecretsStore } from "./lib/plugins.ts";
 import { PluginLoader } from "./lib/plugin_loader.ts";
-import { ChatGPTRuntime } from "./lib/runtime.ts";
+import { loadRuntime } from "./lib/runtime.ts";
+import { SessionControllerID } from "./types/session.d.ts";
 
 const appUrl = new URL(import.meta.url);
 const appPath = await Deno.realPath(new URL(".", appUrl).pathname);
 const pluginsDir = `${appPath}/plugins`;
+const sessionsRootDir = `${appPath}/sessions`;
 
 // Define help text
 const helpText = `
@@ -66,11 +68,14 @@ if (args.install) {
   Deno.exit(0);
 }
 
-const loaderContext = new PluginContext(new PluginSet([]));
+const secrets = new SecretsStore();
+await secrets.store("api.openai.com", await getApiKey());
+
+const pluginContext = new PluginContext(secrets);
 
 const loadAllPlugins = async (loader: PluginLoader): Promise<PluginInstance[]> => {
   const plugins: PluginInstance[] = [];
-  for await (const plugin of loader.loadPlugins(loaderContext)) {
+  for await (const plugin of loader.loadPlugins(pluginContext)) {
     plugins.push(plugin);
   }
   return plugins;
@@ -78,16 +83,13 @@ const loadAllPlugins = async (loader: PluginLoader): Promise<PluginInstance[]> =
 
 const pluginLoader = new PluginLoader(pluginsDir);
 pluginLoader.events.on("plugin/discovered", (path) => console.debug(`Plugin discovered: ${path}`));
-pluginLoader.events.on("plugin/loaded", (plugin) => console.debug(`Plugin ${plugin.metadata.name_for_model} loaded.`));
-const enabledPlugins = new PluginSet(await loadAllPlugins(pluginLoader));
+pluginLoader.events.on("plugin/loaded", (plugin) => console.debug(`Plugin ${plugin.metadata.name} loaded.`));
 
-const pluginContext = new PluginContext(enabledPlugins);
-await pluginContext.secrets.store("api.openai.com", await getApiKey());
+const runtime = loadRuntime(await loadAllPlugins(pluginLoader), sessionsRootDir);
 
-console.debug(`Loaded plugins:${enabledPlugins.plugins.map((plugin) => `\n  - ${plugin.metadata.name_for_model}`).join("") || "\n  (None)"}`);
-console.debug(`Available tools:${enabledPlugins.tools.list().map((toolName) => `\n  - ${toolName}`).join("") || "\n  (None)"}`);
-
-const runtime = new ChatGPTRuntime();
+console.debug(`Loaded plugins:${runtime.plugins.map((plugin) => `\n  - ${plugin.metadata.name}`).join("") || "\n  (None)"}`);
+console.debug(`Available controllers:${Array.from(runtime.features.controllers.keys()).map((id) => `\n  - ${id}`).join("") || "\n  (None)"}`);
+console.debug(`Available tools:${Array.from(runtime.features.tools.keys()).map((toolName) => `\n  - ${toolName}`).join("") || "\n  (None)"}`);
 
 // Get the port number from the arguments or use the default value
 const port = (args.port || args.p || 8080) as number;
@@ -97,10 +99,12 @@ console.log(`HTTP server is running on http://localhost:${port}/`);
 const app = new Application();
 const router = new Router();
 
-const session = await runtime.handleChatCreation(pluginContext);
+const session = await runtime.createSession("basic_chat" as SessionControllerID, {
+  model: "gpt-3.5",
+});
 
 router.get("/api/chat", (ctx) => {
-  const messageHistory = session ? session.chatHistory.getMessages() : [];
+  const messageHistory = session ? session.context.chatHistory.getMessages() : [];
 
   ctx.response.body = messageHistory
     .map(({ actions, createdAt, message }): ChatMessageT => ({
@@ -116,7 +120,7 @@ router.get("/api/chat", (ctx) => {
 
 router.get("/api/chat/events", (ctx) => {
   const stream = session
-    ? eventStreamFromChatHistory(session.chatHistory)
+    ? eventStreamFromChatHistory(session.context.chatHistory)
     : readableStreamFromIterable([]);
 
   const output = stream
@@ -134,14 +138,12 @@ router.post("/api/chat", async (ctx) => {
   const engine = body.engine as string ?? "gpt-3.5-turbo";
   const messageData = body.message as { text: string, type: MessageType } ?? ctx.throw(400, "Missing body parameter: messages");
 
-  session.chatConfig.set("engine", engine);
-
   const message = new HumanChatMessage(messageData.text);
 
   ctx.response.status = 200;
   ctx.response.headers.set("Cache-Control", "no-cache");
   ctx.response.headers.set("Content-Type", "text/event-stream");
-  ctx.response.body = (await runtime.handleUserMessage(message, session))!
+  ctx.response.body = (await session.handleUserMessage(message))!
     .pipeThrough(new JsonStringifyStream())
     .pipeThrough(SSEEncoder());
 });

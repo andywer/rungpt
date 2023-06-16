@@ -1,6 +1,5 @@
 import { EventEmitter } from "https://deno.land/x/event@2.0.1/mod.ts";
-import { AgentAction, BaseChatMessage } from "https://esm.sh/v118/langchain@0.0.67/schema.js";
-import { ChatMessage } from "https://esm.sh/langchain/schema";
+import { AgentAction, BaseChatMessage, ChatMessage } from "https://esm.sh/langchain@0.0.95/schema";
 import { ChatMessage as ChatMessageT, ChatRole } from "../types/chat.d.ts";
 import { ChatEvent } from "../types/chat_events.d.ts";
 import { ChatHistory, ChatHistoryEvents } from "../types/plugins.d.ts";

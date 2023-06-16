@@ -1,6 +1,6 @@
-import { AgentAction, BaseChatMessage } from "https://esm.sh/langchain/schema";
-import { BaseLanguageModel } from "https://esm.sh/v118/langchain@0.0.67/base_language";
-import { Tool } from "https://esm.sh/v118/langchain@0.0.67/tools";
+import { AgentAction, BaseChatMessage } from "https://esm.sh/langchain@0.0.95/schema";
+import { BaseLanguageModel } from "https://esm.sh/v118/langchain@0.0.95/base_language";
+import { Tool } from "https://esm.sh/v118/langchain@0.0.95/tools";
 import { EventEmitter } from "https://deno.land/x/event@2.0.1/mod.ts";
 import { ChatEvent } from "./chat_events.d.ts";
 import { ChatMessage } from "./chat.d.ts";

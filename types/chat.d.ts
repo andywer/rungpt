@@ -1,5 +1,5 @@
-import { AgentAction, BaseChatMessage } from "https://esm.sh/langchain/schema";
-import { MessageType } from "https://esm.sh/v118/langchain@0.0.67/schema.js";
+import { AgentAction, BaseChatMessage } from "https://esm.sh/langchain@0.0.95/schema";
+import { MessageType } from "https://esm.sh/v118/langchain@0.0.95/schema.js";
 import { EventEmitter } from "https://deno.land/x/event@2.0.1/mod.ts";
 import { ChatEvent } from "./chat_events.d.ts";
 

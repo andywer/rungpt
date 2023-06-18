@@ -1,5 +1,5 @@
-import { readableStreamFromIterable } from "https://deno.land/std@0.184.0/streams/readable_stream_from_iterable.ts";
-import { BaseChatMessage } from "https://esm.sh/v118/langchain@0.0.95/schema.js";
+import { readableStreamFromIterable } from "std/streams/readable_stream_from_iterable.ts";
+import { BaseChatMessage } from "langchain/schema";
 import { ParameterType, Parameters, ParsedCodeBlockTag } from "../types/plugins.d.ts";
 
 export function ProcessMessageContent<T>(decode: (input: ReadableStream<string>) => ReadableStream<T>): TransformStream<BaseChatMessage, [T, BaseChatMessage]> {

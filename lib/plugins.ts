@@ -1,4 +1,4 @@
-import { fail } from "https://deno.land/std@0.184.0/testing/asserts.ts";
+import { fail } from "std/testing/asserts.ts";
 import { ChatHistory, PluginContext as PluginContextT } from "../types/plugins.d.ts";
 import { SecretsStore as SecretsStoreT } from "../types/session.d.ts";
 import { InMemoryChatHistory } from "./chat_history.ts";

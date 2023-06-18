@@ -1,4 +1,4 @@
-import { fail } from "https://deno.land/std@0.184.0/testing/asserts.ts";
+import { fail } from "std/testing/asserts.ts";
 import Docker from "https://deno.land/x/denocker@v0.2.1/index.ts";
 import { HostConfig } from "https://deno.land/x/denocker@v0.2.1/lib/types/container/container.ts";
 

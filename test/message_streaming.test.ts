@@ -1,7 +1,7 @@
 // deno-lint-ignore-file no-explicit-any
-import { assertEquals } from "https://deno.land/std@0.184.0/testing/asserts.ts";
+import { assertEquals } from "std/testing/asserts.ts";
 import { MarkdownCodeBlockDecoder, ParsedTaggedCodeBlock, TagInvocationBlockDecoder } from "../lib/stream_transformers.ts";
-import { readableStreamFromIterable } from "https://deno.land/std@0.184.0/streams/readable_stream_from_iterable.ts";
+import { readableStreamFromIterable } from "std/streams/readable_stream_from_iterable.ts";
 
 const codeblock = (tag: string, content: string) => "```" + tag + "\n" + content + "\n```";
 

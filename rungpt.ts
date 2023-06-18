@@ -1,18 +1,18 @@
 // Import necessary modules
 import "https://deno.land/std@0.184.0/dotenv/load.ts";
-import { parse } from "https://deno.land/std@0.184.0/flags/mod.ts";
-import { JsonStringifyStream } from "https://deno.land/std@0.184.0/json/mod.ts";
-import { readableStreamFromIterable } from "https://deno.land/std@0.184.0/streams/readable_stream_from_iterable.ts";
-import { Application, Router, send } from "https://deno.land/x/oak@v12.1.0/mod.ts";
-import { ChatMessage, HumanChatMessage, MessageType } from "https://esm.sh/langchain@0.0.95/schema";
-import { ChatMessage as ChatMessageT, ChatRole } from "./types/chat.d.ts";
-import { PluginInstance } from "./types/plugins.d.ts";
+import { parse } from "std/flags/mod.ts";
+import { JsonStringifyStream } from "std/json/mod.ts";
+import { readableStreamFromIterable } from "std/streams/readable_stream_from_iterable.ts";
+import { Application, Router, send } from "oak/mod.ts";
+import { ChatMessage, HumanChatMessage, MessageType } from "langchain/schema";
 import { installAction } from "./lib/actions.ts";
 import { eventStreamFromChatHistory } from "./lib/chat_history.ts";
 import { SSEEncoder } from "./lib/stream_transformers.ts";
 import { PluginContext, SecretsStore } from "./lib/plugins.ts";
 import { PluginLoader } from "./lib/plugin_loader.ts";
 import { loadRuntime } from "./lib/runtime.ts";
+import { ChatMessage as ChatMessageT, ChatRole } from "./types/chat.d.ts";
+import { PluginInstance } from "./types/plugins.d.ts";
 import { SessionControllerID } from "./types/session.d.ts";
 
 const appUrl = new URL(import.meta.url);

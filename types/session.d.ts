@@ -1,6 +1,6 @@
-import { BaseLanguageModel } from "https://esm.sh/v118/langchain@0.0.95/base_language";
-import { Tool } from "https://esm.sh/v118/langchain@0.0.95/tools";
-import { BaseChatMessage } from "https://esm.sh/langchain@0.0.95/schema";
+import { BaseLanguageModel } from "langchain/base_language";
+import { Tool } from "langchain/tools";
+import { BaseChatMessage } from "langchain/schema";
 import { ChatHistory } from "./chat.d.ts";
 import { ChatEvent } from "./chat_events.d.ts";
 

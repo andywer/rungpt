@@ -1,4 +1,4 @@
-import { ensureDir } from "https://deno.land/std@0.188.0/fs/mod.ts";
+import { ensureDir } from "std/fs/mod.ts";
 import { PluginInstance, SessionController } from "../types/plugins.d.ts";
 import { FeatureRegistry, RegistryNamespace as RegistryNamespaceT, Session, SessionControllerID, SessionID } from "../types/session.d.ts";
 

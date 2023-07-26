@@ -6,12 +6,6 @@ type ActionProcess = Deno.Process<{ cmd: string[], stderr: "piped", stdin: "pipe
 
 const actionsContainerName = "rungpt-actions";
 
-const dockerSocket = await tryFiles([
-  `/var/run/docker.sock`,
-  `${Deno.env.get("HOME")}/.docker/run/docker.sock`,
-]);
-const docker = new Docker(dockerSocket);
-
 export class ActionController {
   constructor(public readonly container: ActionContainer) {}
 
@@ -63,29 +57,45 @@ export class ActionController {
 
 export class ActionContainer {
   constructor(
+    protected readonly docker: Docker,
     public readonly containerId: string,
   ) {}
 
   public readonly actions = new ActionController(this);
 
   async remove(): Promise<void> {
-    await docker.containers.rm(this.containerId);
+    await this.docker.containers.rm(this.containerId);
   }
 
   async running(): Promise<boolean> {
-    const containers = await docker.containers.list({ all: true });
+    const containers = await this.docker.containers.list({ all: true });
     const container = containers.find((c) => c.Id === this.containerId);
 
     return container?.State === "running";
   }
 
   async start(): Promise<void> {
-    await docker.containers.start(this.containerId);
+    await this.docker.containers.start(this.containerId);
   }
 
   async stop(): Promise<void> {
-    await docker.containers.stop(this.containerId);
+    await this.docker.containers.stop(this.containerId);
   }
+}
+
+let dockerCached: Docker | null = null;
+
+function getDockerInstance() {
+  if (dockerCached) {
+    return dockerCached;
+  }
+
+  const dockerSocket = tryFiles([
+    `/var/run/docker.sock`,
+    `${Deno.env.get("HOME")}/.docker/run/docker.sock`,
+  ]);
+  const docker = dockerCached = new Docker(dockerSocket);
+  return docker;
 }
 
 export async function createActionContainer(
@@ -93,6 +103,8 @@ export async function createActionContainer(
   hostConfig?: HostConfig & { Binds?: `${string}:${string}`[] },
 ): Promise<ActionContainer> {
   const name = actionsContainerName;
+  const docker = getDockerInstance();
+
   const container = await docker.containers.create(name, {
     Image: image,
     Hostname: name,
@@ -114,6 +126,7 @@ export async function createActionContainer(
 }
 
 export async function getExistingActionContainer(): Promise<ActionContainer | null> {
+  const docker = getDockerInstance();
   const containers = await docker.containers.list({ all: true });
   const container = containers.find((c) => (c.Names ?? []).includes(`/${actionsContainerName}`));
 
@@ -128,7 +141,7 @@ export async function getExistingActionContainer(): Promise<ActionContainer | nu
     return null;
   }
 
-  const actionContainer = new ActionContainer(container.Id);
+  const actionContainer = new ActionContainer(docker, container.Id);
 
   if (container.State !== "running") {
     await actionContainer.start();
@@ -137,10 +150,10 @@ export async function getExistingActionContainer(): Promise<ActionContainer | nu
   return actionContainer;
 }
 
-async function tryFiles(files: string[]): Promise<string> {
+function tryFiles(files: string[]): string {
   for (const file of files) {
     try {
-      await Deno.stat(file);
+      Deno.statSync(file);
       return file;
     } catch (err) {
       if (err instanceof Deno.errors.NotFound) {

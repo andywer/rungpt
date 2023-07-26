@@ -1,14 +1,9 @@
-import { EventEmitter } from "event/mod.ts";
-import { AgentAction, BaseChatMessage } from "langchain/schema";
 import { BaseLanguageModel } from "langchain/base_language";
+import { BaseChain } from "langchain/chains";
 import { Tool } from "langchain/tools";
-import { ChatEvent } from "./chat_events.d.ts";
-import { ChatMessage } from "./chat.d.ts";
-import { SecretsStore, SessionController } from "./session.d.ts";
-
-export {
-  SessionController,
-};
+import { AppState, BaseAppEvent, BaseSessionEvent, SessionState } from "./app.d.ts";
+import { ChainID, ModelID, ToolID } from "./types.d.ts";
+import { EventMiddleware, StateReducer } from "./state.d.ts";
 
 export interface PluginMetadata {
   schema_version: string;
@@ -16,53 +11,58 @@ export interface PluginMetadata {
   description: string;
 }
 
-export type ChatHistoryEvents = {
-  chat: [event: ChatEvent];
-};
+export interface Plugin {
+  init(provide: PluginProvisions): Promise<void> | void;
+}
 
-export interface ChatHistory {
-  readonly events: EventEmitter<ChatHistoryEvents>;
-  addAction(messageIndex: number, action: AgentAction): Promise<number>;
-  addError(error: Error): Promise<number>;
-  addMessage(message: BaseChatMessage): Promise<number>;
-  appendToMessage(messageIndex: number, append: string): Promise<void>;
-  finalizeMessage(messageIndex: number): Promise<void>;
-  finalizeMessage(messageIndex: number, text: string, actionResult?: Record<string, unknown>): Promise<void>;
-  getMessages(): { actions: ChatMessage["actions"], createdAt: Date, message: BaseChatMessage }[];
-  messageExists(messageIndex: number): boolean;
-  setActionResults(messageIndex: number, actionIndex: number, results: Record<string, unknown>): Promise<void>;
-  streamMessage(message: Omit<BaseChatMessage, "text">, text: ReadableStream<string>): Promise<number>;
+export interface PluginClass<P extends Plugin = Plugin> {
+  new(metadata: PluginMetadata): P;
+
+  /** Property set by our plugin loader */
+  metadata: PluginMetadata;
+  /** Property set by our plugin loader */
+  path: string;
+}
+
+export interface PluginProvisions {
+  app: RuntimeProvision<AppState, BaseAppEvent>;
+  features: FeatureProvisions;
+  session: RuntimeProvision<SessionState, BaseSessionEvent>;
+}
+
+export interface FeatureProvisions {
+  chain: FeatureProvision<BaseChain>;
+  model: FeatureProvision<BaseLanguageModel>;
+  tool: FeatureProvision<Tool>;
+}
+
+export interface FeatureProvision<T> {
+  (id: string, thing: FeatureCtor<T>): FeatureProvisions;
+}
+
+export interface FeatureCtor<T> {
+  (features: FeatureRegistry, session: SessionState): Promise<T> | T;
+}
+
+export interface RuntimeProvision<State, Event> {
+  middleware(middleware: EventMiddleware<State, Event>): this;
+  reducer(reducer: StateReducer<State, Event>): this;
 }
 
 export type ChatMessageRole = "briefing" | "error";
 
-export interface PluginInstance {
-  readonly metadata: PluginMetadata;
-  readonly controllers: Map<string, SessionController>;
-  readonly models: Map<string, BaseLanguageModel>;
-  readonly tools: Map<string, Tool>;
+export type WellKnownSecretID = "api.openai.com";
+
+export interface RegistryNamespace<K extends string, T> {
+  subject: string;
+  entries(): IterableIterator<[K, T]>;
+  get(name: K): T;
+  has(name: K): boolean;
+  keys(): IterableIterator<K>;
 }
 
-export interface PluginContext {
-  secrets: SecretsStore;
-  utils: {
-    createChatHistory(): ChatHistory;
-  };
-}
-
-export type ParameterType = string | number | boolean;
-export type Parameters = { _: ParameterType[] } & Record<string, ParameterType>;
-
-export interface ParsedCodeBlockTag {
-  /// can be an empty string (!)
-  language: string;
-
-  /// additional code block tags, semicolon-separated after language
-  additional: {
-    invocation?: {
-      name: string;
-      parameters: Parameters;
-    };
-    raw: string;
-  }[];
+export interface FeatureRegistry {
+  chains: RegistryNamespace<ChainID, () => Promise<BaseChain>>;
+  models: RegistryNamespace<ModelID, () => Promise<BaseLanguageModel>>;
+  tools: RegistryNamespace<ToolID, () => Promise<Tool>>;
 }

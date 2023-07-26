@@ -1,6 +1,5 @@
 import { readableStreamFromIterable } from "std/streams/readable_stream_from_iterable.ts";
 import { BaseChatMessage } from "langchain/schema";
-import { ParameterType, Parameters, ParsedCodeBlockTag } from "../types/plugins.d.ts";
 
 export function ProcessMessageContent<T>(decode: (input: ReadableStream<string>) => ReadableStream<T>): TransformStream<BaseChatMessage, [T, BaseChatMessage]> {
   return new TransformStream<BaseChatMessage, [T, BaseChatMessage]>({
@@ -57,86 +56,6 @@ export function MarkdownCodeBlockDecoder(consecutiveUpdates = false): TransformS
       }
     },
   });
-}
-
-export interface ParsedTaggedCodeBlock {
-  block: ParsedCodeBlock;
-  tag: ParsedCodeBlockTag;
-}
-
-export function TagInvocationBlockDecoder(): TransformStream<ParsedCodeBlock, ParsedTaggedCodeBlock> {
-  return new TransformStream<ParsedCodeBlock, ParsedTaggedCodeBlock>({
-    transform(block, controller) {
-      if (!block.tag.includes(";") && !block.tag.includes("(")) return;
-      const tag = parseCodeBlockTag(block.tag);
-      controller.enqueue({ block, tag });
-    },
-  });
-}
-
-function parseCodeBlockTag(raw: string): ParsedCodeBlockTag {
-  // FIXME: This will fail in a subtle way if there is a tag invocation
-  //        with a string parameter that contains a semicolon
-  const fragments = raw.split(";").map(frag => frag.trim());
-  const [language, additional] = fragments[0].includes("(")
-    ? ["", fragments]
-    : [fragments[0], fragments.slice(1)];
-  return {
-    language,
-    additional: additional.map(frag => {
-      let invocation: ParsedCodeBlockTag["additional"][number]["invocation"];
-      if (frag.includes("(")) {
-        const [name, paramList] = frag.split("(");
-        invocation = {
-          name: name.trim(),
-          parameters: parseParameters(paramList),
-        };
-      }
-      return {
-        invocation,
-        raw: frag,
-      };
-    }),
-  };
-}
-
-function parseParameters(parameterString: string): Parameters {
-  const namedParamRegex = /(\w+)\s*=\s*(?:(["'])(.*?[^\\])\2|(\w+|-?\d+(\.\d+)?))/g;
-  const unnamedParamRegex = /(?:(["'])(.*?[^\\])\1|(\w+|-?\d+(\.\d+)?))/g;
-
-  const parameters: Record<string, ParameterType> = { };
-  const positional: ParameterType[] = [];
-
-  let match;
-  while ((match = namedParamRegex.exec(parameterString)) !== null) {
-    const [wholeMatch, key, , stringValue, primitiveValue] = match;
-    if (stringValue !== undefined) {
-      parameters[key] = stringValue.replace(/\\(["'])/g, '$1');
-    } else if (primitiveValue === 'true' || primitiveValue === 'false') {
-      parameters[key] = primitiveValue === 'true';
-    } else if (!isNaN(Number(primitiveValue))) {
-      parameters[key] = Number(primitiveValue);
-    } else {
-      parameters[key] = primitiveValue;
-    }
-    parameterString = parameterString.replace(wholeMatch, "");
-    namedParamRegex.lastIndex -= wholeMatch.length;
-  }
-
-  while ((match = unnamedParamRegex.exec(parameterString)) !== null) {
-    const [, , stringValue, primitiveValue] = match;
-    if (stringValue !== undefined) {
-      positional.push(stringValue.replace(/\\(["'])/g, '$1'));
-    } else if (primitiveValue === 'true' || primitiveValue === 'false') {
-      positional.push(primitiveValue === 'true');
-    } else if (!isNaN(Number(primitiveValue))) {
-      positional.push(Number(primitiveValue));
-    } else {
-      positional.push(primitiveValue);
-    }
-  }
-
-  return { ...parameters, _: positional } as Parameters;
 }
 
 /**

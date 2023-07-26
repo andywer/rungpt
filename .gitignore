@@ -2,3 +2,4 @@
 Thumbs.db
 .env
 *.log
+app_state.json

@@ -1,22 +1,18 @@
 // Import necessary modules
-import "https://deno.land/std@0.184.0/dotenv/load.ts";
+import "std/dotenv/load.ts";
 import { parse } from "std/flags/mod.ts";
 import { JsonStringifyStream } from "std/json/mod.ts";
-import { readableStreamFromIterable } from "std/streams/readable_stream_from_iterable.ts";
 import { Application, Router, send } from "oak/mod.ts";
-import { ChatMessage, HumanChatMessage, MessageType } from "langchain/schema";
-import { installAction } from "./lib/actions.ts";
-import { eventStreamFromChatHistory } from "./lib/chat_history.ts";
+import { z } from "zod";
 import { SSEEncoder } from "./lib/stream_transformers.ts";
-import { PluginContext, SecretsStore } from "./lib/plugins.ts";
-import { PluginLoader } from "./lib/plugin_loader.ts";
+import { installPlugin } from "./lib/plugins.ts";
 import { loadRuntime } from "./lib/runtime.ts";
-import { ChatMessage as ChatMessageT, ChatRole } from "./types/chat.d.ts";
-import { PluginInstance } from "./types/plugins.d.ts";
-import { SessionControllerID } from "./types/session.d.ts";
+import { ChatRole } from "./types/chat.d.ts";
+import { ISODateTimeString, SessionID } from "./types/types.d.ts";
 
 const appUrl = new URL(import.meta.url);
 const appPath = await Deno.realPath(new URL(".", appUrl).pathname);
+const appStateFile = `${appPath}/app_state.json`;
 const pluginsDir = `${appPath}/plugins`;
 const sessionsRootDir = `${appPath}/sessions`;
 
@@ -59,7 +55,7 @@ if (args.install) {
   }
 
   try {
-    const targetDir = await installAction(pluginsDir, repo, version);
+    const targetDir = await installPlugin(pluginsDir, repo, version);
     console.log(`Plugin '${repo}'@${version} installed in '${targetDir}'`);
   } catch (error) {
     console.error(`Failed to install plugin '${repo}': ${error.message}`);
@@ -67,27 +63,16 @@ if (args.install) {
   Deno.exit(0);
 }
 
-const secrets = new SecretsStore();
-await secrets.store("api.openai.com", await getApiKey());
+const runtime = await loadRuntime(appStateFile, sessionsRootDir);
 
-const pluginContext = new PluginContext(secrets);
-
-const loadAllPlugins = async (loader: PluginLoader): Promise<PluginInstance[]> => {
-  const plugins: PluginInstance[] = [];
-  for await (const plugin of loader.loadPlugins(pluginContext)) {
-    plugins.push(plugin);
-  }
-  return plugins;
-};
-
-const pluginLoader = new PluginLoader(pluginsDir);
-pluginLoader.events.on("plugin/discovered", (path) => console.debug(`Plugin discovered: ${path}`));
-pluginLoader.events.on("plugin/loaded", (plugin) => console.debug(`Plugin ${plugin.metadata.name} loaded.`));
-
-const runtime = loadRuntime(await loadAllPlugins(pluginLoader), sessionsRootDir);
+runtime.store.subscribe((_state, event) => {
+  console.debug("App event:", event);
+});
+await runtime.init(pluginsDir);
 
 console.debug(`Loaded plugins:${runtime.plugins.map((plugin) => `\n  - ${plugin.metadata.name}`).join("") || "\n  (None)"}`);
-console.debug(`Available controllers:${Array.from(runtime.features.controllers.keys()).map((id) => `\n  - ${id}`).join("") || "\n  (None)"}`);
+console.debug(`Available chains:${Array.from(runtime.features.chains.keys()).map((id) => `\n  - ${id}`).join("") || "\n  (None)"}`);
+console.debug(`Available models:${Array.from(runtime.features.models.keys()).map((id) => `\n  - ${id}`).join("") || "\n  (None)"}`);
 console.debug(`Available tools:${Array.from(runtime.features.tools.keys()).map((toolName) => `\n  - ${toolName}`).join("") || "\n  (None)"}`);
 
 // Get the port number from the arguments or use the default value
@@ -98,29 +83,45 @@ console.log(`HTTP server is running on http://localhost:${port}/`);
 const app = new Application();
 const router = new Router();
 
-const session = await runtime.createSession("basic_chat" as SessionControllerID, {
-  model: "gpt-3.5",
+router.get("/api/app", (ctx) => {
+  ctx.response.body = {
+    features: {
+      chains: Array.from(runtime.features.chains.keys()),
+      models: Array.from(runtime.features.models.keys()),
+      tools: Array.from(runtime.features.tools.keys()),
+    },
+    plugins: Object.fromEntries(
+      runtime.plugins.map((plugin) => [plugin.metadata.name, plugin.metadata])
+    ),
+    state: runtime.store.getState(),
+  };
 });
 
-router.get("/api/chat", (ctx) => {
-  const messageHistory = session ? session.context.chatHistory.getMessages() : [];
+router.get("/api/session/:id", async (ctx) => {
+  const session = await runtime.readSession(ctx.params.id as SessionID);
+  if (!session) {
+    return ctx.throw(404, "Session not found");
+  }
 
-  ctx.response.body = messageHistory
-    .map(({ actions, createdAt, message }): ChatMessageT => ({
-      actions,
-      createdAt: createdAt.toISOString(),
-      message: {
-        ...message,
-        role: (message as ChatMessage).role as ChatRole,
-        type: message._getType(),
-      },
-    }));
+  ctx.response.body = session.store.getState();
 });
 
-router.get("/api/chat/events", (ctx) => {
-  const stream = session
-    ? eventStreamFromChatHistory(session.context.chatHistory)
-    : readableStreamFromIterable([]);
+router.get("/api/session/:id/events", async (ctx) => {
+  let unsubscribe: (() => void) | undefined;
+  const session = await runtime.readSession(ctx.params.id as SessionID) || ctx.throw(404, "Session not found");
+
+  const stream = new ReadableStream<Record<string, unknown>>({
+    start(controller) {
+      unsubscribe = session.store.subscribe((_state, event) => {
+        controller.enqueue(event);
+      });
+    },
+    cancel() {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    }
+  });
 
   const output = stream
     .pipeThrough(new JsonStringifyStream())
@@ -132,19 +133,56 @@ router.get("/api/chat/events", (ctx) => {
   ctx.response.body = output;
 });
 
-router.post("/api/chat", async (ctx) => {
+router.post("/api/session/:id", async (ctx) => {
   const body = await ctx.request.body({ type: "json" }).value;
-  const engine = body.engine as string ?? "gpt-3.5-turbo";
-  const messageData = body.message as { text: string, type: MessageType } ?? ctx.throw(400, "Missing body parameter: messages");
 
-  const message = new HumanChatMessage(messageData.text);
+  const config = z.object({
+    chain: z.string().brand("ChainID"),
+    model: z.string().brand("ModelID"),
+    tools: z.array(z.union([
+      z.string().brand("ToolID"),
+      z.literal("*"),
+    ])),
+  }).parse(body);
 
-  ctx.response.status = 200;
-  ctx.response.headers.set("Cache-Control", "no-cache");
-  ctx.response.headers.set("Content-Type", "text/event-stream");
-  ctx.response.body = (await session.handleUserMessage(message))!
-    .pipeThrough(new JsonStringifyStream())
-    .pipeThrough(SSEEncoder());
+  if (!body.chain) {
+    ctx.throw(400, "Missing body parameter: chain");
+  }
+  if (!body.model) {
+    ctx.throw(400, "Missing body parameter: model");
+  }
+  if (!body.tools) {
+    ctx.throw(400, "Missing body parameter: tools");
+  }
+
+  const session = await runtime.createSession(ctx.params.id as SessionID, config);
+  ctx.response.body = session.store.getState();
+});
+
+router.post("/api/session/:id/message", async (ctx) => {
+  const body = await ctx.request.body({ type: "json" }).value;
+  const message = z.object({
+    role: z.string().default("user").transform((role) => role as ChatRole),
+    text: z.string(),
+  }).parse(body.message);
+
+  const session = await runtime.readSession(ctx.params.id as SessionID) || ctx.throw(404, "Session not found");
+  const prevMessages = session.store.getState().messages;
+
+  const [_updatedState, execution] = session.store.dispatch({
+    type: "message/added",
+    payload: {
+      actions: [],
+      createdAt: new Date().toISOString() as ISODateTimeString,
+      index: prevMessages.length,
+      message,
+    },
+  });
+
+  await execution;
+
+  ctx.response.status = 204;
+  ctx.response.body = "";
 });
 
 app.use(async (ctx, next) => {
@@ -165,20 +203,3 @@ app.use(router.routes());
 app.use(router.allowedMethods());
 
 await app.listen({ port: port });
-
-async function getApiKey(): Promise<string> {
-  const apiKey = Deno.env.get("OPENAI_API_KEY");
-
-  if (apiKey) {
-    return apiKey;
-  } else {
-    console.log("Please enter your OpenAI API key:");
-    const input = new TextEncoder().encode("OPENAI_API_KEY=");
-    await Deno.stdout.write(input);
-    const apiKeyBuffer = new Uint8Array(51); // Assuming a 51-character long API key
-    await Deno.stdin.read(apiKeyBuffer);
-    const apiKeyString = new TextDecoder().decode(apiKeyBuffer).trim();
-    Deno.env.set("OPENAI_API_KEY", apiKeyString);
-    return apiKeyString;
-  }
-}

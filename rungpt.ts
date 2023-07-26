@@ -64,10 +64,6 @@ if (args.install) {
 }
 
 const runtime = await loadRuntime(appStateFile, sessionsRootDir);
-
-runtime.store.subscribe((_state, event) => {
-  console.debug("App event:", event);
-});
 await runtime.init(pluginsDir);
 
 console.debug(`Loaded plugins:${runtime.plugins.map((plugin) => `\n  - ${plugin.metadata.name}`).join("") || "\n  (None)"}`);

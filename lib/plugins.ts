@@ -1,4 +1,3 @@
-import { fail } from "std/testing/asserts.ts";
 import { PluginMetadata } from "../types/plugins.d.ts";
 
 export async function installPlugin(pluginsDir: string, repo: string, version: string): Promise<string> {

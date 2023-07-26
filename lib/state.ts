@@ -1,4 +1,7 @@
+import { debug } from "debug/mod.ts";
 import { EventMiddleware, ExtendableStateStore, MiddlewareStack, StateReducer } from "../types/state.d.ts";
+
+const debugEventDispatch = debug("store:dispatch");
 
 export type StoreEvent<State, Event> = {
   dispatch: [action: Event];
@@ -30,6 +33,8 @@ class StateStore<State, Event> implements ExtendableStateStore<State, Event> {
   }
 
   dispatch(event: Event): [updatedState: State, execution: Promise<void>] {
+    debugEventDispatch("%o", event);
+
     const next = this.combinedReducer(this.state, event);
     const [stack, controller] = this.middlewareStack.createStack();
 

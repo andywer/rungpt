@@ -1,4 +1,6 @@
+import { debug } from "debug/mod.ts";
 import { CallbackManager } from "langchain/callbacks";
+import { AgentFinish } from "langchain/schema";
 import { AppState, BaseAppEvent, BaseSessionEvent, BaseSessionStore, SessionID, SessionState } from "../types/app.d.ts";
 import { ChatMessage } from "../types/chat.d.ts";
 import { FeatureRegistry, Plugin, PluginClass } from "../types/plugins.d.ts";
@@ -8,6 +10,7 @@ import { ISODateTimeString } from "../types/types.d.ts";
 import { FeaturesProvided, InternalFeatureRegistry, PluginInitializer } from "./plugin_initializer.ts";
 import { PluginLoader } from "./plugin_loader.ts";
 import { createStateStore } from "./state.ts";
+import { throttle } from "./utils.ts";
 
 enum ChatRole {
   Assistant = "assistant",
@@ -24,7 +27,7 @@ enum ChatRole {
 export class Runtime implements RuntimeT {
   public readonly instantiatedPlugins: [Plugin, PluginClass, FeaturesProvided][] = [];
   public readonly plugins: PluginClass[] = [];
-  public readonly sessions = new WeakMap<SessionID, Promise<Session<BaseSessionStore>>>();
+  public readonly sessions = new Map<SessionID, Promise<Session<BaseSessionStore>>>();
   public readonly store: StateStore<AppState, BaseAppEvent>;
 
   private nextRunId = 1;
@@ -36,22 +39,24 @@ export class Runtime implements RuntimeT {
     app: {
       middleware: (async (event, stack, getState) => {
         await stack.next(event);
-        await this.appStorage.store(getState());
+        await this.appStorage.storeThrottled(getState());
       }) satisfies EventMiddleware<AppState, BaseAppEvent>,
       reducer: ((state, event) => {
         const lastOf = <T>(array: T[]) => array.length > 0 ? array[array.length - 1] : undefined;
         const truncate = (text: string, length: number) => text.length > length ? `${text.slice(0, length)}…` : text;
         const getTitle = (session: SessionState) => (
-          truncate(lastOf(session.messages)?.message.text ?? "New session", 50)
+          truncate((lastOf(session.messages)?.message.text ?? "New session") || "Unnamed session", 50)
         );
         if (event.type === "session/created" || event.type === "session/read") {
+          if (state.sessions.some((session) => session.id === event.payload.id)) {
+            return state;
+          }
           return {
             ...state,
-            sessions: state.sessions.map((session) => (
-              session.id === event.payload.id
-                ? { id: event.payload.id, createdAt: event.payload.createdAt, title: getTitle(event.payload) }
-                : session
-            )),
+            sessions: [
+              ...state.sessions,
+              { id: event.payload.id, createdAt: event.payload.createdAt, title: getTitle(event.payload) },
+            ],
           };
         } else {
           return state;
@@ -63,13 +68,14 @@ export class Runtime implements RuntimeT {
         if (event.type === "message/added" && event.payload.message.role === ChatRole.User) {
           const session = getState();
           const runId = this.nextRunId++;
-          const prompt = session.messages.filter((message) => message.message.role === ChatRole.User);
           await stack.next(event);
           await stack.dispatch({
             type: "chain/run",
-            payload: { chainId: session.config.chain, runId, prompt },
+            payload: { chainId: session.config.chain, runId, prompt: event.payload.message.text },
           });
         } else if (event.type === "chain/run") {
+          let lastAction: AgentFinish | undefined;
+
           const actions: ChatMessage["actions"] = [];
           const chain = await getFeatures().chains.get(event.payload.chainId)();
           const createdAt = new Date().toISOString() as ISODateTimeString;
@@ -91,64 +97,48 @@ export class Runtime implements RuntimeT {
           });
 
           try {
-            const response = await chain.run(event.payload.prompt, CallbackManager.fromHandlers({
-              async handleAgentAction(action) {
-                actions.push({
-                  input: action.toolInput,
-                  tool: action.tool,
-                });
-                await stack.dispatch({
-                  type: "message/updated",
-                  payload: {
-                    actions,
-                    createdAt,
-                    index: messageIndex,
-                    message,
-                  },
-                });
-              },
-              async handleAgentEnd(result) {
-                actions[actions.length - 1] = {
-                  ...actions[actions.length - 1],
-                  results: result.returnValues,
-                };
-                await stack.dispatch({
-                  type: "message/updated",
-                  payload: {
-                    actions,
-                    createdAt,
-                    index: messageIndex,
-                    message,
-                  },
-                });
-              },
-              async handleLLMNewToken(token) {
-                message.text += token;
-                await stack.dispatch({
-                  type: "message/updated",
-                  payload: {
-                    actions,
-                    createdAt,
-                    index: messageIndex,
-                    message,
-                  },
-                });
+            let response = await chain.run(event.payload.prompt, CallbackManager.fromHandlers({
+              handleAgentEnd(result) {
+                lastAction = result;
               },
               async handleToolStart(tool, input) {
+                actions.push({
+                  input,
+                  tool: tool.id[tool.id.length - 1],
+                });
                 await stack.dispatch({
                   type: "tool/call",
                   payload: {
                     isJson: false,
                     params: JSON.stringify(input),
                     runId: event.payload.runId,
-                    toolName: tool.id.join("."),
+                    toolName: tool.id[tool.id.length - 1],
+                  },
+                });
+                await stack.dispatch({
+                  type: "message/updated",
+                  payload: {
+                    actions,
+                    createdAt,
+                    index: messageIndex,
+                    message,
                   },
                 });
               },
               async handleToolEnd(output) {
+                actions[actions.length - 1].result = output;
                 await stack.dispatch({
                   type: "tool/call/response",
                   payload: { runId: event.payload.runId, isJson: false, response: output },
+                });
+                await stack.dispatch({
+                  type: "message/updated",
+                  payload: {
+                    actions,
+                    createdAt,
+                    index: messageIndex,
+                    message,
+                  },
                 });
               },
               async handleToolError(error) {
@@ -158,6 +148,11 @@ export class Runtime implements RuntimeT {
                 });
               },
             }));
+
+            if (!response && lastAction?.returnValues?.output) {
+              response = lastAction.returnValues.output;
+            }
+
             await stack.dispatch({
               type: "chain/run/response",
               payload: { runId: event.payload.runId, isJson: false, response },
@@ -197,7 +192,7 @@ export class Runtime implements RuntimeT {
         } else {
           await stack.next(event);
         }
-        await this.sessionStorage.store(getState());
+        await this.sessionStorage.storeThrottled(getState());
       }) satisfies EventMiddleware<SessionState, BaseSessionEvent>,
       reducer: ((state, event) => {
         if (event.type === "message/added") {
@@ -214,7 +209,7 @@ export class Runtime implements RuntimeT {
             messages: [
               ...state.messages.slice(0, event.payload.index),
               event.payload,
-              ...state.messages.slice(event.payload.index),
+              ...state.messages.slice(event.payload.index + 1),
             ],
           } satisfies SessionState;
         } else {
@@ -233,10 +228,14 @@ export class Runtime implements RuntimeT {
       sessions: [],
     };
 
-    const appStore = createStateStore<AppState, BaseAppEvent>(initialState, [this.builtin.app.reducer], [this.builtin.app.middleware]);
+    const appStore = createStateStore<AppState, BaseAppEvent>("app", initialState, [this.builtin.app.reducer], [this.builtin.app.middleware]);
 
     this.pluginInitializer = new PluginInitializer(appStore, features);
     this.store = appStore;
+
+    for (const sessionId of sessionStorage.list()) {
+      this.store.dispatch({ type: "session/read", payload: sessionStorage.get(sessionId)! });
+    }
   }
 
   async init(pluginsPath: string): Promise<void> {
@@ -302,7 +301,7 @@ export class Runtime implements RuntimeT {
 
   private async instantiateSessionUncached(state: SessionState): Promise<Session<BaseSessionStore>> {
     const builtin = this.builtin.session(() => this.features.public(state));
-    const sessionStore = createStateStore<SessionState, BaseSessionEvent>(state, [builtin.reducer], [builtin.middleware]);
+    const sessionStore = createStateStore<SessionState, BaseSessionEvent>("session", state, [builtin.reducer], [builtin.middleware]);
 
     for (const [_plugin, _PluginClass, provided] of this.instantiatedPlugins) {
       sessionStore.registerMiddlewares(...provided.session.middlewares);
@@ -348,6 +347,8 @@ export async function loadRuntime(appStatePath: string, sessionsRootPath: string
 }
 
 class AppStorage {
+  private lastKnownState: AppState | null = null;
+
   constructor(
     public readonly path: string,
   ) {}
@@ -355,7 +356,11 @@ class AppStorage {
   async read(): Promise<AppState | null> {
     try {
       const content = await Deno.readTextFile(this.path);
-      return JSON.parse(content) as AppState;
+
+      // It is possible that `content` is empty if the file is being written to right now
+      return content
+        ? JSON.parse(content) as AppState
+        : this.lastKnownState;
     } catch (error) {
       if (error instanceof Deno.errors.NotFound) {
         return null;
@@ -366,19 +371,28 @@ class AppStorage {
   }
 
   async store(state: AppState): Promise<void> {
+    this.lastKnownState = state;
     await Deno.writeTextFile(this.path, JSON.stringify(state));
   }
+
+  storeThrottled = throttle(this.store.bind(this), 1000);
 }
+
+const debugSessionStorage = debug("session:storage");
 
 class SessionStorage {
   protected index: SessionID[] = [];
   protected storedSessions: Map<SessionID, SessionState> = new Map();
+
+  private _storeThrottled = throttle(this._store.bind(this), 1000);
 
   constructor(
     public readonly path: string,
   ) {}
 
   async init(): Promise<void> {
+    debugSessionStorage("Initializing session storage at %s", this.path);
+
     for await (const dirEntry of Deno.readDir(this.path)) {
       if (dirEntry.isFile && !dirEntry.name.match(/^[\._]/) && dirEntry.name.match(/\.json$/i)) {
         const content = await Deno.readTextFile(`${this.path}/${dirEntry.name}`);
@@ -390,6 +404,12 @@ class SessionStorage {
         }
       }
     }
+
+    this.index.sort((a, b) => {
+      const sessionA = this.storedSessions.get(a)!;
+      const sessionB = this.storedSessions.get(b)!;
+      return sessionA.createdAt.localeCompare(sessionB.createdAt);
+    });
   }
 
   get(id: SessionID): SessionState | undefined {
@@ -401,6 +421,18 @@ class SessionStorage {
   }
 
   async store(session: SessionState): Promise<void> {
+    this.storedSessions.set(session.id, session);
+    await this._store(session);
+  }
+
+  async storeThrottled(session: SessionState): Promise<void> {
+    this.storedSessions.set(session.id, session);
+    await this._storeThrottled(session);
+  }
+
+  private async _store(session: SessionState): Promise<void> {
+    debugSessionStorage("Storing session: %o", session);
+
     const sessionPath = `${this.path}/${session.createdAt} - ${session.id}.json`;
     await Deno.writeTextFile(sessionPath, JSON.stringify(session));
   }

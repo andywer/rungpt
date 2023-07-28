@@ -155,7 +155,7 @@ router.post("/api/session/:id", async (ctx) => {
   ctx.response.body = session.store.getState();
 });
 
-router.post("/api/session/:id/message", async (ctx) => {
+router.post("/api/session/:id/messages", async (ctx) => {
   const body = await ctx.request.body({ type: "json" }).value;
   const message = z.object({
     role: z.string().default("user").transform((role) => role as ChatRole),
@@ -165,7 +165,7 @@ router.post("/api/session/:id/message", async (ctx) => {
   const session = await runtime.readSession(ctx.params.id as SessionID) || ctx.throw(404, "Session not found");
   const prevMessages = session.store.getState().messages;
 
-  const [_updatedState, execution] = session.store.dispatch({
+  await session.store.dispatch({
     type: "message/added",
     payload: {
       actions: [],
@@ -175,10 +175,7 @@ router.post("/api/session/:id/message", async (ctx) => {
     },
   });
 
-  await execution;
-
-  ctx.response.status = 204;
-  ctx.response.body = "";
+  ctx.response.body = { success: true };
 });
 
 app.use(async (ctx, next) => {

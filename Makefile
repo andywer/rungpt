@@ -15,7 +15,7 @@ run:
 
 .PHONY: dev
 dev:
-	DEBUG=store:dispatch deno run $(DENO_PERMISSIONS) --watch rungpt.ts
+	DEBUG=session:storage,store:* deno run $(DENO_PERMISSIONS) --watch rungpt.ts
 
 .PHONY: inspect
 inspect:

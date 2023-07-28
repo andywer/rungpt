@@ -18,7 +18,7 @@ export interface ChatMessage {
   actions: {
     tool: string;
     input: string;
-    results?: Record<string, unknown>;
+    result?: string;
   }[];
   message: {
     role: ChatRole;

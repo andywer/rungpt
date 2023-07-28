@@ -1,7 +1,5 @@
-import { debug } from "debug/mod.ts";
+import { Debug, debug } from "debug/mod.ts";
 import { EventMiddleware, ExtendableStateStore, MiddlewareStack, StateReducer } from "../types/state.d.ts";
-
-const debugEventDispatch = debug("store:dispatch");
 
 export type StoreEvent<State, Event> = {
   dispatch: [action: Event];
@@ -20,9 +18,12 @@ class StateStore<State, Event> implements ExtendableStateStore<State, Event> {
   protected combinedReducer: StateReducer<State, Event>;
   protected state: State;
 
+  private debugDispatch: Debug;
+
   private readonly subscriptions = new Set<(state: State, event: Event) => void>();
 
   constructor(
+    name: string,
     initialState: State,
     private reducers: StateReducer<State, Event>[],
     private middlewares: EventMiddleware<State, Event>[] = [],
@@ -30,26 +31,29 @@ class StateStore<State, Event> implements ExtendableStateStore<State, Event> {
     this.state = initialState;
     this.combinedReducer = chainReducers(...reducers);
     this.middlewareStack = new EventMiddlewareImpl(middlewares, () => this.state, (event) => this.dispatch(event));
+    this.debugDispatch = debug(`store:${name}:dispatch`);
   }
 
-  dispatch(event: Event): [updatedState: State, execution: Promise<void>] {
-    debugEventDispatch("%o", event);
-
-    const next = this.combinedReducer(this.state, event);
-    const [stack, controller] = this.middlewareStack.createStack();
-
-    const middlewareExecution = stack.next(event).then(() => controller.assertHasBeenCalled());
-
-    this.state = next;
-    for (const listener of this.subscriptions) {
-      try {
-        listener(next, event);
-      } catch (error) {
-        console.error(error);
-      }
+  async dispatch(event: Event): Promise<State> {
+    // deno-lint-ignore no-explicit-any
+    if ((event as any).debug !== false) {
+      this.debugDispatch("%o", event);
     }
 
-    return [next, middlewareExecution];
+    await this.middlewareStack.execute(event, (resultingEvent) => {
+      const next = this.combinedReducer(this.state, resultingEvent);
+      this.state = next;
+
+      for (const listener of this.subscriptions) {
+        try {
+          listener(next, resultingEvent);
+        } catch (error) {
+          console.error(error);
+        }
+      }
+    });
+
+    return this.state;
   }
 
   getState(): State {
@@ -58,7 +62,7 @@ class StateStore<State, Event> implements ExtendableStateStore<State, Event> {
 
   registerMiddlewares(...middlewares: EventMiddleware<State, Event>[]): void {
     this.middlewares.push(...middlewares);
-    this.middlewareStack = new EventMiddlewareImpl(middlewares, () => this.state, (event) => this.dispatch(event));
+    this.middlewareStack = new EventMiddlewareImpl(this.middlewares, () => this.state, (event) => this.dispatch(event));
   }
 
   registerReducers(...reducers: StateReducer<State, Event>[]): void {
@@ -73,11 +77,12 @@ class StateStore<State, Event> implements ExtendableStateStore<State, Event> {
 }
 
 export function createStateStore<State, Event>(
+  name: string,
   initialState: State,
   reducers: StateReducer<State, Event>[],
   middlewares: EventMiddleware<State, Event>[] = [],
 ): StateStore<State, Event> {
-  return new StateStore(initialState, reducers, middlewares);
+  return new StateStore(name, initialState, reducers, middlewares);
 }
 
 class EventMiddlewareImpl<State, Event> {
@@ -87,48 +92,40 @@ class EventMiddlewareImpl<State, Event> {
     protected readonly dispatch: StateStore<State, Event>["dispatch"],
   ) { }
 
-  createStack(): [MiddlewareStack<Event>, { assertHasBeenCalled(): void }] {
-    return this.createSubstack(this.middlewares[0] ?? null, this.middlewares.slice(1));
+  execute(event: Event, sink: (event: Event) => Promise<void> | void): Promise<void> {
+    return this._execute(this.middlewares, event, sink);
   }
 
-  protected createSubstack(
-    current: EventMiddleware<State, Event>,
-    remaining: EventMiddleware<State, Event>[],
-  ): [MiddlewareStack<Event>, { assertHasBeenCalled(): void }] {
-    const next = remaining[0] ?? null;
-    let hasBeenCalled = false;
+  protected async _execute(
+    middlewares: EventMiddleware<State, Event>[],
+    event: Event,
+    sink: (event: Event) => Promise<void> | void,
+  ): Promise<void> {
+    if (middlewares.length === 0) {
+      return sink(event);
+    }
 
-    const controller = {
-      assertHasBeenCalled: () => {
-        if (!hasBeenCalled) {
-          throw new Error(`Middleware "${current.name}" did not call next() or skip()`);
-        }
-      },
-    };
+    const current = middlewares[0]!;
+    let hasBeenCalled = false;
 
     const stack: MiddlewareStack<Event> = {
       dispatch: async (event) => {
-        const [_newState, execution] = this.dispatch(event);
-        await execution;
+        await this.dispatch(event);
       },
       next: async (event) => {
         hasBeenCalled = true;
-
-        if (!next) {
-          return;
-        }
-
-        const [substack, subcontroller] = this.createSubstack(next, remaining.slice(1));
-        await next(event, substack, this.getState);
-
-        subcontroller.assertHasBeenCalled();
+        await this._execute(middlewares.slice(1), event, sink);
       },
       skip: () => {
         hasBeenCalled = true;
       },
     };
 
-    return [stack, controller];
+    await current(event, stack, this.getState);
+
+    if (!hasBeenCalled) {
+      throw new Error(`Middleware "${current.name}" did not call next() or skip()`);
+    }
   }
 }
 

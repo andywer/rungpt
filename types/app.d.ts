@@ -42,11 +42,11 @@ export type BaseAppEvent =
   | { type: "session/read"; payload: SessionState };
 
 export type BaseSessionEvent =
-  | { type: "chain/run"; payload: { chainId: ChainID; runId: number; prompt: ChatMessage[] } }
+  | { type: "chain/run"; payload: { chainId: ChainID; runId: number; prompt: string } }
   | { type: "chain/run/response"; payload: { runId: number; isJson: boolean; response: string } }
   | { type: "chain/run/error"; payload: { runId: number; error: Error } }
   | { type: "message/added"; payload: ChatMessage & { index: number} }
-  | { type: "message/updated"; payload: ChatMessage & { index: number} }
+  | { type: "message/updated"; payload: ChatMessage & { index: number}; debug?: boolean }
   | { type: "message/finalized"; payload: ChatMessage & { index: number} }
   | { type: "tool/call"; payload: { isJson: boolean; params: string; runId: number; toolName: string; } }
   | { type: "tool/call/response"; payload: { runId: number; isJson: boolean; response: string } }

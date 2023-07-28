@@ -38,8 +38,8 @@ export interface EventMiddleware<State, EventIn, EventOut = EventIn> {
 export type UnsubscribeFn = () => void;
 
 export interface StateStore<State, Event> {
-  /** The state is updated synchronously, but middlewares run asynchronously */
-  dispatch(event: Event): [updatedState: State, execution: Promise<void>];
+  /** Dispatch an event, run it through middlewares, update state */
+  dispatch(event: Event): Promise<State>;
 
   /** Returns the current state */
   getState(): State;

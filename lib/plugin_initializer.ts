@@ -2,6 +2,7 @@
 import { BaseLanguageModel } from "langchain/base_language";
 import { BaseChain } from "langchain/chains";
 import { Tool } from "langchain/tools";
+import { httpErrors } from "oak/mod.ts";
 import {
 FeatureCtor,
   FeatureProvision,
@@ -48,7 +49,7 @@ export class PluginInitializer {
     this.appStore.registerReducers(...provided.app.reducers);
     this.features.import(provided.features);
 
-    this.appStore.dispatch({ type: "plugin/initialized", payload: { path: PluginClass.path } });
+    await this.appStore.dispatch({ type: "plugin/initialized", payload: { path: PluginClass.path } });
     return [plugin, provided];
   }
 
@@ -257,7 +258,7 @@ class PublicRegistryNamespace<K extends string, T> extends BaseRegistryNamespace
   get(name: K): () => T {
     const item = this.items.get(name);
     if (!item) {
-      throw new Error(`No ${this.subject} with name ${name}`);
+      throw new httpErrors.BadRequest(`No ${this.subject} with name ${name}`);
     }
     return item;
   }

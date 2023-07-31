@@ -7,7 +7,7 @@ import { SessionID } from "./types.d.ts";
 export interface Runtime {
   plugins: PluginClass[];
   store: StateStore<AppState, BaseAppEvent>;
-  init(pluginsPath: string): Promise<void>;
+  init(pluginsPaths: string[]): Promise<void>;
   createSession(id: SessionID, config: SessionState["config"]): Promise<Session<BaseSessionStore>>;
   readSession(sessionId: SessionID): Promise<Session<BaseSessionStore> | null>;
   storeSession(session: Session<BaseSessionStore>): Promise<void>;

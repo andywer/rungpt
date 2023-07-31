@@ -1,5 +1,5 @@
 import { assertEquals, assertInstanceOf } from "std/testing/asserts.ts";
-import { ActionContainer, createActionContainer, getExistingActionContainer } from "../plugins/docker.builtin/lib/docker_manager.ts";
+import { ActionContainer, createActionContainer, getExistingActionContainer } from "../plugins/builtin/docker/lib/docker_manager.ts";
 
 const dockerImageName = "rungpt_actions:latest";
 

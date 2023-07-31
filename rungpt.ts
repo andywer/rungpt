@@ -12,7 +12,8 @@ import { ISODateTimeString, SessionID } from "./types/types.d.ts";
 const appUrl = new URL(import.meta.url);
 const appPath = await Deno.realPath(new URL(".", appUrl).pathname);
 const appStateFile = `${appPath}/app_state.json`;
-const pluginsDir = `${appPath}/plugins`;
+const builtinPluginsDir = `${appPath}/plugins/builtin`;
+const installedPluginsDir = `${appPath}/plugins/installed`;
 const sessionsRootDir = `${appPath}/sessions`;
 
 // Define help text
@@ -54,7 +55,7 @@ if (args.install) {
   }
 
   try {
-    const targetDir = await installPlugin(pluginsDir, repo, version);
+    const targetDir = await installPlugin(installedPluginsDir, repo, version);
     console.log(`Plugin '${repo}'@${version} installed in '${targetDir}'`);
   } catch (error) {
     console.error(`Failed to install plugin '${repo}': ${error.message}`);
@@ -63,7 +64,7 @@ if (args.install) {
 }
 
 const runtime = await loadRuntime(appStateFile, sessionsRootDir);
-await runtime.init(pluginsDir);
+await runtime.init([builtinPluginsDir, installedPluginsDir]);
 
 console.debug(`Loaded plugins:${runtime.plugins.map((plugin) => `\n  - ${plugin.metadata.name}`).join("") || "\n  (None)"}`);
 console.debug(`Available chains:${Array.from(runtime.features.chains.keys()).map((id) => `\n  - ${id}`).join("") || "\n  (None)"}`);

@@ -238,15 +238,17 @@ export class Runtime implements RuntimeT {
     }
   }
 
-  async init(pluginsPath: string): Promise<void> {
+  async init(pluginsPaths: string[]): Promise<void> {
     const appState = await this.appStorage.read();
     if (appState) {
       this.store.dispatch({ type: "app/loaded", payload: appState });
     }
 
-    for (const PluginClass of await this.preloadPlugins(pluginsPath)) {
-      this.plugins.push(PluginClass);
-      await this.initializePlugin(PluginClass);
+    for (const pluginsPath of pluginsPaths) {
+      for (const PluginClass of await this.preloadPlugins(pluginsPath)) {
+        this.plugins.push(PluginClass);
+        await this.initializePlugin(PluginClass);
+      }
     }
 
     this.store.dispatch({ type: "app/init", payload: {} });

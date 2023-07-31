@@ -1,25 +1,20 @@
 import { fail } from "std/testing/asserts.ts";
 import Docker from "https://deno.land/x/denocker@v0.2.1/index.ts";
 import { HostConfig } from "https://deno.land/x/denocker@v0.2.1/lib/types/container/container.ts";
+import { ListContainerResponse } from "https://deno.land/x/denocker@v0.2.1/lib/types/container/mod.ts";
 
 type ActionProcess = Deno.Process<{ cmd: string[], stderr: "piped", stdin: "piped", stdout: "piped" }>;
 
 const actionsContainerName = "rungpt-actions";
+const appUrl = new URL(import.meta.url);
+const appPath = await Deno.realPath(new URL("../../../..", appUrl).pathname);
+const sharedDir = `${appPath}/shared`;
 
 export class ActionController {
   constructor(public readonly container: ActionContainer) {}
 
-  public invokeShell<T>(script: string, callback: (process: ActionProcess) => T): T {
+  protected invokeHostShell<T>(cmd: string[], callback: (process: ActionProcess) => T): T {
     let callbackIsAsync = false;
-
-    const cmd = [
-      "docker",
-      "exec",
-      this.container.containerId,
-      "bash",
-      "-c",
-      script.trim() + "\nexit $?\n",
-    ];
 
     const process = Deno.run({
       cmd,
@@ -52,6 +47,34 @@ export class ActionController {
         cleanUp();
       }
     }
+  }
+
+  invokeShell<T>(script: string, callback: (process: ActionProcess) => T): T {
+    const cmd = [
+      "docker",
+      "exec",
+      this.container.containerId,
+      "bash",
+      "-c",
+      script.trim() + "\nexit $?\n",
+    ];
+
+    return this.invokeHostShell(cmd, callback);
+  }
+
+  writeFile(filePath: string, content: Uint8Array): void {
+    const cmd = [
+      "docker",
+      "exec",
+      this.container.containerId,
+      "bash",
+      "-c",
+      `cat > ${JSON.stringify(filePath)}\n`,
+    ];
+
+    return this.invokeHostShell(cmd, (process) => {
+      process.stdin.write(content);
+    });
   }
 }
 
@@ -98,7 +121,7 @@ function getDockerInstance() {
   return docker;
 }
 
-export async function createActionContainer(
+async function createActionContainer(
   image: string,
   hostConfig?: HostConfig & { Binds?: `${string}:${string}`[] },
 ): Promise<ActionContainer> {
@@ -118,16 +141,25 @@ export async function createActionContainer(
     StopTimeout: 1,
   });
 
-  if (!container.Id) {
+  if (!container.Id && !container.message?.includes("is already in use by container")) {
     throw new Error(`Failed to create actions container '${name}' using image '${image}': ${container.message}`);
   }
 
   return (await getExistingActionContainer()) || fail(`Failed to retrieve newly created actions container '${name}' with ID '${container.Id}'`);
 }
 
-export async function getExistingActionContainer(): Promise<ActionContainer | null> {
-  const docker = getDockerInstance();
-  const containers = await docker.containers.list({ all: true });
+async function getExistingActionContainer(): Promise<ActionContainer | null> {
+  let containers: ListContainerResponse[];
+  let docker: Docker;
+
+  try {
+    docker = getDockerInstance();
+    containers = await docker.containers.list({ all: true });
+  } catch (error) {
+    error.message = `Docker error: ${error.message}`;
+    throw error;
+  }
+
   const container = containers.find((c) => (c.Names ?? []).includes(`/${actionsContainerName}`));
 
   if (!container) {
@@ -148,6 +180,15 @@ export async function getExistingActionContainer(): Promise<ActionContainer | nu
   }
 
   return actionContainer;
+}
+
+export async function getContainer() {
+  const dockerImage = Deno.env.get("RUNGPT_DOCKER_IMAGE") || "rungpt_actions:latest";
+  const container = await getExistingActionContainer()
+    ?? await createActionContainer(dockerImage, {
+      Binds: [`${sharedDir}:/shared`],
+    });
+  return container;
 }
 
 function tryFiles(files: string[]): string {

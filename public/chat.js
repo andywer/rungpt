@@ -252,7 +252,7 @@ async function subscribeToChatEvents(sessionID) {
       if (message.actions.length > 0 && !message.actions[message.actions.length - 1].result && event.payload.actions[message.actions.length - 1].result) {
         // Trigger re-rendering of the last action
         message.actions = message.actions.slice(0, -1);
-        message.contentElement.querySelector(".tool").remove();
+        message.contentElement.querySelector(".action").remove();
       }
 
       const newActions = event.payload.actions.slice(message.actions.length);

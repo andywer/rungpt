@@ -1,12 +1,7 @@
 import { ISODateTimeString } from "./types.d.ts";
 
-// Consistent with the OpenAI API
-export enum ChatRole {
-  Assistant = "assistant",
-  Error = "error",
-  System = "system",
-  User = "user",
-}
+/** Origin of a chat message. Not an enum as this file is for type declarations only. */
+export type ChatRole = "assistant" | "error" | "system" | "user";
 
 /**
  * Single message in a chat, sent by the user, the AI or the framework.

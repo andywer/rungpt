@@ -4,7 +4,6 @@ import { parse } from "std/flags/mod.ts";
 import { JsonStringifyStream } from "std/json/mod.ts";
 import { Application, Router, send } from "oak/mod.ts";
 import { z } from "zod";
-import { SSEEncoder } from "./lib/stream_transformers.ts";
 import { installPlugin } from "./lib/plugins.ts";
 import { loadRuntime } from "./lib/runtime.ts";
 import { ChatRole } from "./types/chat.d.ts";
@@ -104,6 +103,8 @@ router.get("/api/session/:id", async (ctx) => {
 
 router.get("/api/session/:id/events", async (ctx) => {
   let unsubscribe: (() => void) | undefined;
+
+  const encoder = new TextEncoder();
   const session = await runtime.readSession(ctx.params.id as SessionID) || ctx.throw(404, "Session not found");
 
   const stream = new ReadableStream<Record<string, unknown>>({
@@ -121,7 +122,11 @@ router.get("/api/session/:id/events", async (ctx) => {
 
   const output = stream
     .pipeThrough(new JsonStringifyStream())
-    .pipeThrough(SSEEncoder());
+    .pipeThrough(new TransformStream({
+      transform(chunk: string, controller: TransformStreamDefaultController<Uint8Array>) {
+        controller.enqueue(encoder.encode(`data: ${chunk}`));
+      },
+    }));
 
   ctx.response.status = 200;
   ctx.response.headers.set("Cache-Control", "no-cache");

@@ -64,7 +64,7 @@ export class Runtime implements RuntimeT {
         }
       }) satisfies StateReducer<AppState, BaseAppEvent>,
     },
-    session: (getFeatures: () => FeatureRegistry) => ({
+    session: (getFeatures: (getState: () => SessionState) => FeatureRegistry) => ({
       middleware: (async (event, stack, getState) => {
         if (event.type === "message/added" && event.payload.message.role === ChatRole.User) {
           const session = getState();
@@ -78,7 +78,7 @@ export class Runtime implements RuntimeT {
           let lastAction: AgentFinish | undefined;
 
           const actions: ChatMessage["actions"] = [];
-          const chain = await getFeatures().chains.get(event.payload.chainId)();
+          const chain = await getFeatures(getState).chains.get(event.payload.chainId)();
           const createdAt = new Date().toISOString() as ISODateTimeString;
           const messageIndex = getState().messages.length;
           const message: ChatMessage["message"] = {
@@ -296,28 +296,28 @@ export class Runtime implements RuntimeT {
     return session;
   }
 
-  protected instantiateSession(state: SessionState): Promise<Session<BaseSessionStore>> {
-    if (!this.sessions.has(state.id)) {
-      this.sessions.set(state.id, this.instantiateSessionUncached(state));
+  protected instantiateSession(currentState: SessionState): Promise<Session<BaseSessionStore>> {
+    if (!this.sessions.has(currentState.id)) {
+      this.sessions.set(currentState.id, this.instantiateSessionUncached(currentState));
     }
-    return this.sessions.get(state.id)!;
+    return this.sessions.get(currentState.id)!;
   }
 
-  private async instantiateSessionUncached(state: SessionState): Promise<Session<BaseSessionStore>> {
-    const builtin = this.builtin.session(() => this.features.public(state));
-    const sessionStore = createStateStore<SessionState, BaseSessionEvent>("session", state, [builtin.reducer], [builtin.middleware]);
+  private async instantiateSessionUncached(currentState: SessionState): Promise<Session<BaseSessionStore>> {
+    const builtin = this.builtin.session((getState) => this.features.public(getState));
+    const sessionStore = createStateStore<SessionState, BaseSessionEvent>("session", currentState, [builtin.reducer], [builtin.middleware]);
 
     for (const [_plugin, _PluginClass, provided] of this.instantiatedPlugins) {
       sessionStore.registerMiddlewares(...provided.session.middlewares);
       sessionStore.registerReducers(...provided.session.reducers);
     }
 
-    const features = this.features.public(state);
-    const chain = await (features.chains.get(state.config.chain))();
+    const features = this.features.public(() => currentState);
+    const chain = await (features.chains.get(currentState.config.chain))();
 
     const session: Session<BaseSessionStore> = {
       chain,
-      id: state.id,
+      id: currentState.id,
       features,
       store: sessionStore,
     };

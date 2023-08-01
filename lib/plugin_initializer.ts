@@ -52,33 +52,6 @@ export class PluginInitializer {
     await this.appStore.dispatch({ type: "plugin/initialized", payload: { path: PluginClass.path } });
     return [plugin, provided];
   }
-
-//   async instantiateFeatures(provided: FeaturesProvided, PluginClass: PluginClass, sessionStore: ExtendableStateStore<SessionState, BaseSessionEvent>) {
-//     const features = InternalFeatureRegistry.empty();
-//     const featureMapping = [
-//       [this.features.chains, features.chains],
-//       [this.features.models, features.models],
-//       [this.features.tools, features.tools],
-//     ] as const;
-
-//     for (const [lazy, destination] of featureMapping) {
-//       for (const id of lazy.keys()) {
-//         const lazyFeature = lazy.get(id as any)!;
-//         try {
-//           const feature = await lazyFeature(sessionStore.getState());
-//           destination.set(id, feature as any);
-//         } catch (error) {
-//           console.error(error);
-//           throw new Error(`Failed to instantiate lazy feature ${id} from plugin ${PluginClass.path}: ${error.message}`);
-//         }
-//       }
-//     }
-
-//     sessionStore.registerMiddlewares(...provided.session.middlewares);
-//     sessionStore.registerReducers(...provided.session.reducers);
-
-//     return features;
-//   }
 }
 
 function createProvisioning(): [PluginProvisions, FeaturesProvided] {
@@ -129,7 +102,6 @@ function createProvisioning(): [PluginProvisions, FeaturesProvided] {
         return provisioning.session;
       },
     },
-
   };
 
   return [provisioning, provided];
@@ -164,15 +136,15 @@ export class InternalFeatureRegistry {
     this.tools.import(registry.tools);
   }
 
-  public(session: SessionState): FeatureRegistryT {
+  public(getSessionState: () => SessionState): FeatureRegistryT {
     // deno-lint-ignore prefer-const
     let publicRegistry: FeatureRegistryT;
     const getFeatures = () => publicRegistry;
 
     publicRegistry = new PublicFeatureRegistry(
-      this.chains.public(getFeatures, session),
-      this.models.public(getFeatures, session),
-      this.tools.public(getFeatures, session),
+      this.chains.public(getFeatures, getSessionState),
+      this.models.public(getFeatures, getSessionState),
+      this.tools.public(getFeatures, getSessionState),
     );
     return publicRegistry;
   }
@@ -245,10 +217,10 @@ class InternalRegistryNamespace<K extends string, T> extends BaseRegistryNamespa
     }
   }
 
-  public(getFeatures: () => FeatureRegistryT, session: SessionState): RegistryNamespaceT<K, () => Promise<T>> {
+  public(getFeatures: () => FeatureRegistryT, getSessionState: () => SessionState): RegistryNamespaceT<K, () => Promise<T>> {
     const items = new Map<K, () => Promise<T>>();
     for (const [id, lazy] of this.items.entries()) {
-      items.set(id, () => Promise.resolve(lazy(getFeatures(), session)));
+      items.set(id, () => Promise.resolve(lazy(getFeatures(), getSessionState())));
     }
     return new PublicRegistryNamespace(this.subject, items);
   }

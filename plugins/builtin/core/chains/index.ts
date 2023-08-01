@@ -14,10 +14,6 @@ export const createChatChain = async (features: FeatureRegistry, session: Sessio
     desiredToolNames.map((toolName) => features.tools.get(toolName)())
   );
 
-  const executor = await initializeAgentExecutorWithOptions(tools, model, {
-    agentType: "chat-conversational-react-description",
-  });
-
   const memory = new BufferMemory({
     chatHistory: new ChatMessageHistory(
       messages.map(message => toLangchainMessage(message))
@@ -26,6 +22,10 @@ export const createChatChain = async (features: FeatureRegistry, session: Sessio
     returnMessages: true,
   });
 
-  executor.memory = memory;
+  const executor = await initializeAgentExecutorWithOptions(tools, model, {
+    agentType: "chat-conversational-react-description",
+    memory,
+  });
+
   return executor;
 };

@@ -1,76 +1,72 @@
-import { fail } from "https://deno.land/std@0.184.0/testing/asserts.ts";
-import {
-  PluginContext as PluginContextT,
-  PluginInstance,
-  PluginProvision,
-  PluginSet as PluginSetT,
-  RuntimeImplementation,
-  SecretsStore as SecretsStoreT,
-} from "../plugins.d.ts";
-import { BaseLanguageModel } from "https://esm.sh/v118/langchain@0.0.67/dist/base_language/index.js";
-import { Tool } from "https://esm.sh/v118/langchain@0.0.67/dist/tools/index.js";
+import { PluginMetadata } from "../types/plugins.d.ts";
 
-export class SecretsStore implements SecretsStoreT {
-  #secrets = new Map<string, string>();
+export async function installPlugin(pluginsDir: string, repo: string, version: string): Promise<string> {
+  const [user, repoName] = repo.split("/");
+  const installUrl = `https://github.com/${user}/${repoName}.git`;
 
-  // deno-lint-ignore require-await
-  async exists(secretName: string): Promise<boolean> {
-    return this.#secrets.has(secretName);
+  const targetDir = `${pluginsDir}/${user}_${repoName}`;
+
+  await Deno.mkdir(pluginsDir, { recursive: true });
+  const status = await Deno.run({
+    cmd: ["git", "-c", "advice.detachedHead=false", "clone", "--branch", version, "--depth", "1", installUrl, targetDir],
+  }).status();
+
+  if (!status.success) {
+    throw new Error(`Failed to install plugin '${repo}'`);
   }
+  return targetDir;
+}
 
-  // deno-lint-ignore require-await
-  async read(secretName: string): Promise<string> {
-    return this.#secrets.get(secretName) || fail(`Secret not found: ${secretName}`);
-  }
+export async function getPluginMetadata(pluginPath: string): Promise<PluginMetadata> {
+  const metadataPath = `${pluginPath}/manifest.json`;
 
-  // deno-lint-ignore require-await
-  async store(secretName: string, secretValue: string): Promise<void> {
-    this.#secrets.set(secretName, secretValue);
+  try {
+    const metadataContent = await Deno.readTextFile(metadataPath);
+    const metadata = JSON.parse(metadataContent) as PluginMetadata;
+
+    validatePluginMetadata(metadata);
+
+    return metadata;
+  } catch (error) {
+    throw new Error(`Failed to retrieve or validate plugin metadata at '${metadataPath}': ${error.message}`);
   }
 }
 
-export class PluginContext implements PluginContextT {
-  constructor(
-    public readonly enabledPlugins: PluginSetT,
-  ) { }
+// deno-lint-ignore no-explicit-any
+function validatePluginMetadata(metadata: any): metadata is PluginMetadata {
+  const requiredProperties: { [key: string]: string } = {
+    schema_version: "string",
+    name_for_human: "string",
+    name_for_model: "string",
+    description_for_human: "string",
+  };
 
-  secrets = new SecretsStore();
+  for (const [property, type] of Object.entries(requiredProperties)) {
+    // deno-lint-ignore valid-typeof
+    if (typeof metadata[property] !== type) {
+      throw new Error(`Invalid metadata: '${property}' is missing or not a ${type}`);
+    }
+  }
+
+  // Add additional validation checks here, if necessary
+
+  return true;
 }
 
-export class PluginSet implements PluginSetT {
-  models = this.aggregateUtils<BaseLanguageModel>("models");
-  runtimes = this.aggregateUtils<RuntimeImplementation>("runtimes");
-  tools = this.aggregateUtils<Tool>("tools");
+export async function getInstalledActions(installedDir: string): Promise<string[]> {
+  try {
+    const entries = Deno.readDir(installedDir);
+    const pluginDirs: string[] = [];
 
-  constructor(
-    public readonly plugins: PluginInstance[],
-  ) { }
-
-  private aggregateUtils<T, K extends "models" | "runtimes" | "tools" = "models" | "runtimes" | "tools">(key: K): PluginProvision<T> {
-    const lookup = new Map<string, PluginInstance>();
-    for (const plugin of this.plugins) {
-      for (const name of plugin[key].list()) {
-        lookup.set(name, plugin);
+    for await (const entry of entries) {
+      if (entry.isDirectory && !entry.name.startsWith(".")) {
+        const pluginPath = `${installedDir}/${entry.name}`;
+        pluginDirs.push(pluginPath);
       }
     }
-    const aggregated: PluginProvision<T> = {
-      load(name: string): Promise<T> {
-        const plugin = lookup.get(name);
-        if (!plugin) {
-          return fail(`No ${key} with that name found: ${name}`);
-        }
-        return plugin[key].load(name) as Promise<T>;
-      },
-      async loadAll(): Promise<T[]> {
-        return (await Promise.all(
-          Array.from(lookup.values())
-            .map((plugin) => plugin[key].loadAll())
-        )).flat() as T[];
-      },
-      list(): string[] {
-        return Array.from(lookup.keys());
-      },
-    };
-    return aggregated;
+
+    return pluginDirs;
+  } catch (error) {
+    throw new Error(`Failed to retrieve installed plugins from '${installedDir}': ${error.message}`);
   }
 }

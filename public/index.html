@@ -3,18 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ChatGPT</title>
+    <title>RunGPT</title>
     <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
+    <aside class="chatlist">
+        <h3>Chats</h3>
+        <ul id="chat-list"></ul>
+    </aside>
     <div class="container">
-        <h1>ChatGPT</h1>
+        <h1>RunGPT</h1>
         <div id="chat-box" class="chat-box"></div>
         <form id="chat-form" class="chat-form">
             <textarea id="input-message" type="text" placeholder="Type your message..."></textarea>
             <button type="submit">Send</button>
         </form>
     </div>
-    <script src="/main.js"></script>
+    <script src="/chat_list.js"></script>
+    <script src="/chat.js"></script>
 </body>
 </html>

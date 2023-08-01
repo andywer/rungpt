@@ -3,21 +3,22 @@
     font-family: 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
 }
 
+*[role="button"] {
+    cursor: pointer;
+}
+
 body {
     margin: 0;
     padding: 0;
     display: flex;
-    justify-content: center;
-    align-items: center;
     min-height: 100vh;
     background-color: #f0f2f5;
 }
 
 .container {
-    width: 90%;
-    max-width: 50rem;
+    flex-grow: 1;
     background-color: #ffffff;
-    padding: 2rem;
+    padding: 2rem calc(10% - 4rem);
     border-radius: 5px;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
@@ -27,6 +28,51 @@ h1 {
     font-size: 1.75em;
     color: #2c3e50;
     margin-bottom: 1.25rem;
+}
+
+aside.chatlist {
+    display: flex;
+    flex-direction: column;
+    height: 95vh;
+    width: 100%;
+    max-width: 16rem;
+    margin-top: 2rem;
+}
+
+aside.chatlist > h3 {
+    text-align: left;
+    text-transform: uppercase;
+    font-size: 1.25em;
+    color: #2c3e50;
+    margin-bottom: 1.25rem;
+    padding-left: 1rem;
+}
+
+#chat-list {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    list-style-type: none;
+    padding: 0;
+    margin: 0;
+}
+
+#chat-list > li {
+    padding: 1rem;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+#chat-list > li:hover {
+    background-color: #ffffff80;
+}
+
+#chat-list > li.chat-list-item--selected {
+    background-color: #5680e9;
+    color: #ffffff;
+}
+
+.chat-list-item-title {
+    font-size: 1em;
+    overflow: hidden;
 }
 
 .chat-box {
@@ -132,10 +178,18 @@ h1 {
     color: #2c3e50;
 }
 
-.input {
-    margin: 0.25em 0 0;
+.input, .output {
+    margin: 0.5em 0 0;
     font-size: 0.85em;
     color: #999;
+    overflow: auto;
+    max-height: 3rem;
+    white-space: pre;
+}
+
+.output {
+    padding-top: 0.5em;
+    border-top: 1px solid #bbb;
 }
 
 .content .spinner {

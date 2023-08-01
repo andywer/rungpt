@@ -1,4 +1,4 @@
-import { mergeReadableStreams } from "https://deno.land/std@0.184.0/streams/merge_readable_streams.ts";
+import { mergeReadableStreams } from "std/streams/merge_readable_streams.ts";
 import { AnsiStripper } from "./ansi.ts";
 
 export function streamExecutedCommand(process: Deno.Process<{ cmd: string[], stderr: "piped", stdout: "piped" }>): ReadableStream<string> {

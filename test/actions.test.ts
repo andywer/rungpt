@@ -1,11 +1,7 @@
-import { assertEquals, assertInstanceOf } from "https://deno.land/std@0.184.0/testing/asserts.ts";
-import { ActionContainer, createActionContainer, getExistingActionContainer } from "../plugins/docker.builtin/lib/docker_manager.ts";
+import { assertEquals, assertInstanceOf } from "std/testing/asserts.ts";
+import { ActionContainer, createActionContainer, getExistingActionContainer } from "../plugins/builtin/docker/lib/docker_manager.ts";
 
 const dockerImageName = "rungpt_actions:latest";
-
-const testUrl = new URL(import.meta.url);
-const testPath = await Deno.realPath(new URL(".", testUrl).pathname);
-const actionsDir = `${testPath}/fixtures/actions`;
 
 Deno.test("can instantiate an ActionContainer", withActionContainer((actionContainer) => {
   assertInstanceOf(actionContainer, ActionContainer);

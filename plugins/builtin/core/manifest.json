@@ -1,0 +1,5 @@
+{
+    "schema_version": "0.0.0",
+    "name": "core",
+    "description": "Default session controllers"
+  }

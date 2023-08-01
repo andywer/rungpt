@@ -44,9 +44,10 @@ export class Runtime implements RuntimeT {
       reducer: ((state, event) => {
         const lastOf = <T>(array: T[]) => array.length > 0 ? array[array.length - 1] : undefined;
         const truncate = (text: string, length: number) => text.length > length ? `${text.slice(0, length)}…` : text;
-        const getTitle = (session: SessionState) => (
-          truncate((lastOf(session.messages)?.message.text ?? "New session") || "Unnamed session", 50)
-        );
+        const getTitle = (session: SessionState) => {
+          const message = lastOf(session.messages.filter((msg) => !!msg.message.text));
+          return truncate((message?.message.text ?? "New session") || "Unnamed session", 50);
+        };
         if (event.type === "session/created" || event.type === "session/read") {
           if (state.sessions.some((session) => session.id === event.payload.id)) {
             return state;

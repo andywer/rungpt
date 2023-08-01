@@ -104,7 +104,8 @@ export class Runtime implements RuntimeT {
               async handleToolStart(tool, input) {
                 actions.push({
                   input,
-                  tool: tool.id[tool.id.length - 1],
+                  // deno-lint-ignore no-explicit-any
+                  tool: (tool as any).name ?? tool.id[tool.id.length - 1],
                 });
                 await stack.dispatch({
                   type: "tool/call",

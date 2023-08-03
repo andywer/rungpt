@@ -70,6 +70,7 @@ console.debug(`Loaded plugins:${runtime.plugins.map((plugin) => `\n  - ${plugin.
 console.debug(`Available chains:${Array.from(runtime.features.chains.keys()).map((id) => `\n  - ${id}`).join("") || "\n  (None)"}`);
 console.debug(`Available models:${Array.from(runtime.features.models.keys()).map((id) => `\n  - ${id}`).join("") || "\n  (None)"}`);
 console.debug(`Available tools:${Array.from(runtime.features.tools.keys()).map((toolName) => `\n  - ${toolName}`).join("") || "\n  (None)"}`);
+console.debug(``);
 
 // Get the port number from the arguments or use the default value
 const port = (args.port || args.p || 8080) as number;

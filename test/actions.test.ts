@@ -1,7 +1,5 @@
 import { assertEquals, assertInstanceOf } from "std/testing/asserts.ts";
-import { ActionContainer, createActionContainer, getExistingActionContainer } from "../plugins/builtin/docker/lib/docker_manager.ts";
-
-const dockerImageName = "rungpt_actions:latest";
+import { ActionContainer, getContainer } from "../plugins/builtin/docker/lib/docker_manager.ts";
 
 Deno.test("can instantiate an ActionContainer", withActionContainer((actionContainer) => {
   assertInstanceOf(actionContainer, ActionContainer);
@@ -19,10 +17,7 @@ Deno.test("actions container is operational", withActionContainer(async (actionC
 
 function withActionContainer(fn: (actionContainer: ActionContainer, t: Deno.TestContext) => Promise<void> | void) {
   return async (t: Deno.TestContext) => {
-    let actionContainer = await getExistingActionContainer();
-    if (!actionContainer) {
-      actionContainer = await createActionContainer(dockerImageName);
-    }
+    const actionContainer = await getContainer();
     if (!await actionContainer.running()) {
       await actionContainer.start();
     }

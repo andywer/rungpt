@@ -30,7 +30,7 @@ class StateStore<State, Event> implements ExtendableStateStore<State, Event> {
   ) {
     this.state = initialState;
     this.combinedReducer = chainReducers(...reducers);
-    this.middlewareStack = new EventMiddlewareImpl(middlewares, () => this.state, (event) => this.dispatch(event));
+    this.middlewareStack = new EventMiddlewareImpl(middlewares, this);
     this.debugDispatch = debug(`store:${name}:dispatch`);
   }
 
@@ -62,7 +62,7 @@ class StateStore<State, Event> implements ExtendableStateStore<State, Event> {
 
   registerMiddlewares(...middlewares: EventMiddleware<State, Event>[]): void {
     this.middlewares.push(...middlewares);
-    this.middlewareStack = new EventMiddlewareImpl(this.middlewares, () => this.state, (event) => this.dispatch(event));
+    this.middlewareStack = new EventMiddlewareImpl(this.middlewares, this);
   }
 
   registerReducers(...reducers: StateReducer<State, Event>[]): void {
@@ -88,8 +88,7 @@ export function createStateStore<State, Event>(
 class EventMiddlewareImpl<State, Event> {
   constructor(
     protected middlewares: EventMiddleware<State, Event>[],
-    protected readonly getState: () => State,
-    protected readonly dispatch: StateStore<State, Event>["dispatch"],
+    protected readonly store: StateStore<State, Event>,
   ) { }
 
   execute(event: Event, sink: (event: Event) => Promise<void> | void): Promise<void> {
@@ -110,7 +109,7 @@ class EventMiddlewareImpl<State, Event> {
 
     const stack: MiddlewareStack<Event> = {
       dispatch: async (event) => {
-        await this.dispatch(event);
+        await this.store.dispatch(event);
       },
       next: async (event) => {
         hasBeenCalled = true;
@@ -121,7 +120,7 @@ class EventMiddlewareImpl<State, Event> {
       },
     };
 
-    await current(event, stack, this.getState);
+    await current(event, stack, this.store);
 
     if (!hasBeenCalled) {
       throw new Error(`Middleware "${current.name}" did not call next() or skip()`);

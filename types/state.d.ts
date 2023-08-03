@@ -27,11 +27,11 @@ export interface MiddlewareStack<Event> {
 /**
  * Processes an event, potentially creating new events for results, side effects, etc.
  */
-export interface EventMiddleware<State, EventIn, EventOut = EventIn> {
+export interface EventMiddleware<State, EventIn, EventOut = EventIn, Dispatchable = EventIn | EventOut> {
   (
     event: EventIn,
-    stack: MiddlewareStack<EventIn | EventOut>,
-    getState: () => State,
+    stack: MiddlewareStack<Dispatchable>,
+    store: StateStore<State, Dispatchable>
   ): Promise<void>;
 }
 

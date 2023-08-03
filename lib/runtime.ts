@@ -37,9 +37,9 @@ export class Runtime implements RuntimeT {
 
   protected builtin = {
     app: {
-      middleware: (async (event, stack, getState) => {
+      middleware: (async (event, stack, store) => {
         await stack.next(event);
-        await this.appStorage.storeThrottled(getState());
+        await this.appStorage.storeThrottled(store.getState());
       }) satisfies EventMiddleware<AppState, BaseAppEvent>,
       reducer: ((state, event) => {
         const lastOf = <T>(array: T[]) => array.length > 0 ? array[array.length - 1] : undefined;
@@ -64,10 +64,10 @@ export class Runtime implements RuntimeT {
         }
       }) satisfies StateReducer<AppState, BaseAppEvent>,
     },
-    session: (getFeatures: (getState: () => SessionState) => FeatureRegistry) => ({
-      middleware: (async (event, stack, getState) => {
+    session: (getFeatures: (store: BaseSessionStore) => FeatureRegistry) => ({
+      middleware: (async (event, stack, store) => {
         if (event.type === "message/added" && event.payload.message.role === ChatRole.User) {
-          const session = getState();
+          const session = store.getState();
           const runId = this.nextRunId++;
           await stack.next(event);
           await stack.dispatch({
@@ -78,9 +78,9 @@ export class Runtime implements RuntimeT {
           let lastAction: AgentFinish | undefined;
 
           const actions: ChatMessage["actions"] = [];
-          const chain = await getFeatures(getState).chains.get(event.payload.chainId)();
+          const chain = await getFeatures(store).chains.get(event.payload.chainId)();
           const createdAt = new Date().toISOString() as ISODateTimeString;
-          const messageIndex = getState().messages.length;
+          const messageIndex = store.getState().messages.length;
           const message: ChatMessage["message"] = {
             role: ChatRole.Assistant,
             text: "",
@@ -184,7 +184,7 @@ export class Runtime implements RuntimeT {
             payload: {
               actions: [],
               createdAt: new Date().toISOString() as ISODateTimeString,
-              index: getState().messages.length,
+              index: store.getState().messages.length,
               message: {
                 role: ChatRole.Error,
                 text: event.payload.error.message,
@@ -194,7 +194,7 @@ export class Runtime implements RuntimeT {
         } else {
           await stack.next(event);
         }
-        await this.sessionStorage.storeThrottled(getState());
+        await this.sessionStorage.storeThrottled(store.getState());
       }) satisfies EventMiddleware<SessionState, BaseSessionEvent>,
       reducer: ((state, event) => {
         if (event.type === "message/added") {
@@ -304,7 +304,7 @@ export class Runtime implements RuntimeT {
   }
 
   private async instantiateSessionUncached(currentState: SessionState): Promise<Session<BaseSessionStore>> {
-    const builtin = this.builtin.session((getState) => this.features.public(getState));
+    const builtin = this.builtin.session((store) => this.features.public(store.getState.bind(store)));
     const sessionStore = createStateStore<SessionState, BaseSessionEvent>("session", currentState, [builtin.reducer], [builtin.middleware]);
 
     for (const [_plugin, _PluginClass, provided] of this.instantiatedPlugins) {

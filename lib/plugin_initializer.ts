@@ -4,7 +4,10 @@ import { BaseChain } from "langchain/chains";
 import { Tool } from "langchain/tools";
 import { httpErrors } from "oak/mod.ts";
 import {
-FeatureCtor,
+BoundChainFeatureDescriptor,
+  BoundFeatureDescriptor,
+  ChainFeatureDescriptor,
+  FeatureDescriptor,
   FeatureProvision,
   FeatureProvisions,
   FeatureRegistry as FeatureRegistryT,
@@ -15,6 +18,8 @@ FeatureCtor,
 } from "../types/plugins.d.ts";
 import { AppState, BaseAppEvent, BaseSessionEvent, ChainID, ModelID, SessionState, ToolID } from "../types/app.d.ts";
 import { EventMiddleware, ExtendableStateStore, StateReducer } from "../types/state.d.ts";
+
+type Dtor<T> = FeatureDescriptor<T> | ChainFeatureDescriptor<T>;
 
 export interface FeaturesProvided {
   app: {
@@ -69,7 +74,7 @@ function createProvisioning(): [PluginProvisions, FeaturesProvided] {
 
   const createFeatureProvision = <K extends keyof FeatureRegistryT>(subject: K, getSelf: () => FeatureProvisions): FeatureProvision<any> => {
     type T = FeatureRegistryT[K] extends RegistryNamespaceT<any, infer T> ? T : never;
-    const provision = (id: string, thing: FeatureCtor<T>) => {
+    const provision = (id: string, thing: T) => {
       provided.features[subject].set(id as any, thing as any);
       return getSelf();
     };
@@ -109,9 +114,9 @@ function createProvisioning(): [PluginProvisions, FeaturesProvided] {
 
 export class InternalFeatureRegistry {
   protected constructor(
-    public chains: InternalRegistryNamespace<ChainID, BaseChain>,
-    public models: InternalRegistryNamespace<ModelID, BaseLanguageModel>,
-    public tools: InternalRegistryNamespace<ToolID, Tool>,
+    public chains: InternalRegistryNamespace<ChainID, BaseChain, ChainFeatureDescriptor>,
+    public models: InternalRegistryNamespace<ModelID, BaseLanguageModel, FeatureDescriptor<BaseLanguageModel>>,
+    public tools: InternalRegistryNamespace<ToolID, Tool, FeatureDescriptor<Tool>>,
   ) {}
 
   static empty(): InternalFeatureRegistry {
@@ -136,6 +141,14 @@ export class InternalFeatureRegistry {
     this.tools.import(registry.tools);
   }
 
+  keys(): Record<keyof FeatureRegistryT, string[]> {
+    return {
+      chains: Array.from(this.chains.keys()),
+      models: Array.from(this.models.keys()),
+      tools: Array.from(this.tools.keys()),
+    };
+  }
+
   public(getSessionState: () => SessionState): FeatureRegistryT {
     // deno-lint-ignore prefer-const
     let publicRegistry: FeatureRegistryT;
@@ -152,9 +165,9 @@ export class InternalFeatureRegistry {
 
 export class PublicFeatureRegistry implements FeatureRegistryT {
   constructor(
-    public chains: RegistryNamespaceT<ChainID, () => Promise<BaseChain>>,
-    public models: RegistryNamespaceT<ModelID, () => Promise<BaseLanguageModel>>,
-    public tools: RegistryNamespaceT<ToolID, () => Promise<Tool>>,
+    public chains: RegistryNamespaceT<ChainID, BoundChainFeatureDescriptor>,
+    public models: RegistryNamespaceT<ModelID, BoundFeatureDescriptor<BaseLanguageModel>>,
+    public tools: RegistryNamespaceT<ToolID, BoundFeatureDescriptor<Tool>>,
   ) {}
 }
 
@@ -186,13 +199,13 @@ class BaseRegistryNamespace<K extends string, T> {
   }
 }
 
-class InternalRegistryNamespace<K extends string, T> extends BaseRegistryNamespace<K, FeatureCtor<T>> {
-  static empty<K extends string, T>(subject: string): InternalRegistryNamespace<K, T> {
+class InternalRegistryNamespace<K extends string, T, C extends Dtor<T>> extends BaseRegistryNamespace<K, C> {
+  static empty<K extends string, T, C extends Dtor<T>>(subject: string): InternalRegistryNamespace<K, T, C> {
     return new InternalRegistryNamespace(subject, new Map());
   }
 
-  static merge<K extends string, T>(...namespaces: InternalRegistryNamespace<K, T>[]) {
-    const map = new Map<K, FeatureCtor<T>>();
+  static merge<K extends string, T, C extends Dtor<T>>(...namespaces: InternalRegistryNamespace<K, T, C>[]) {
+    const map = new Map<K, C>();
     for (const namespace of namespaces) {
       for (const [name, item] of namespace.entries()) {
         if (map.has(name)) {
@@ -201,14 +214,14 @@ class InternalRegistryNamespace<K extends string, T> extends BaseRegistryNamespa
         map.set(name, item);
       }
     }
-    return new InternalRegistryNamespace<K, T>(namespaces[0].subject, map);
+    return new InternalRegistryNamespace<K, T, C>(namespaces[0].subject, map);
   }
 
-  clone(): InternalRegistryNamespace<K, T> {
+  clone(): InternalRegistryNamespace<K, T, C> {
     return new InternalRegistryNamespace(this.subject, new Map(this.items));
   }
 
-  import(registry: InternalRegistryNamespace<K, T>) {
+  import(registry: InternalRegistryNamespace<K, T, C>) {
     for (const [id, item] of registry.entries()) {
       if (this.items.has(id)) {
         throw new Error(`Duplicate ${this.subject} ID: ${id}`);
@@ -217,20 +230,40 @@ class InternalRegistryNamespace<K extends string, T> extends BaseRegistryNamespa
     }
   }
 
-  public(getFeatures: () => FeatureRegistryT, getSessionState: () => SessionState): RegistryNamespaceT<K, () => Promise<T>> {
-    const items = new Map<K, () => Promise<T>>();
-    for (const [id, lazy] of this.items.entries()) {
-      items.set(id, () => Promise.resolve(lazy(getFeatures(), getSessionState())));
+  public(getFeatures: () => FeatureRegistryT, getSessionState: () => SessionState): RegistryNamespaceT<K, C extends ChainFeatureDescriptor<T> ? BoundChainFeatureDescriptor<T> : BoundFeatureDescriptor<T>> {
+    type B = C extends ChainFeatureDescriptor<T> ? BoundChainFeatureDescriptor<T> : BoundFeatureDescriptor<T>;
+    const items = new Map<K, B>();
+
+    const getKeys = (features: FeatureRegistryT): Record<keyof FeatureRegistryT, string[]> => {
+      return {
+        chains: Array.from(features.chains.keys()),
+        models: Array.from(features.models.keys()),
+        tools: Array.from(features.tools.keys()),
+      };
+    };
+
+    for (const [id, descriptor] of this.items.entries()) {
+      items.set(id, {
+        ...descriptor,
+        config: "config" in descriptor
+          ? () => Promise.resolve(descriptor.config(getKeys(getFeatures())))
+          : undefined,
+        init: () => Promise.resolve(descriptor.init(getFeatures(), getSessionState())),
+      } as BoundChainFeatureDescriptor<T> as B);
     }
-    return new PublicRegistryNamespace(this.subject, items);
+    return new PublicRegistryNamespace<K, B>(this.subject, items);
   }
 }
 
-class PublicRegistryNamespace<K extends string, T> extends BaseRegistryNamespace<K, () => T> implements RegistryNamespaceT<K, () => T> {
-  get(name: K): () => T {
+function capitalize(text: string): string {
+  return text && (text[0].toLocaleUpperCase() + text.substring(1));
+}
+
+class PublicRegistryNamespace<K extends string, T> extends BaseRegistryNamespace<K, T> implements RegistryNamespaceT<K, T> {
+  get(name: K): T {
     const item = this.items.get(name);
     if (!item) {
-      throw new httpErrors.BadRequest(`No ${this.subject} with name ${name}`);
+      throw new httpErrors.BadRequest(`${capitalize(this.subject)} not found: ${name}`);
     }
     return item;
   }

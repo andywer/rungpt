@@ -1,3 +1,4 @@
+import { FeatureDescriptor } from "../../../../types/plugins.d.ts";
 import { ActionContainer, getContainer } from "../lib/docker_manager.ts";
 import { DockerTool } from "../lib/tool.ts";
 
@@ -22,4 +23,9 @@ class FileReaderTool extends DockerTool {
   }
 }
 
-export default FileReaderTool;
+const descriptor: FeatureDescriptor<DockerTool> = {
+  description: "Read files from docker container",
+  init: () => new FileReaderTool(),
+};
+
+export default descriptor;

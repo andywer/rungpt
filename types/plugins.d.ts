@@ -1,9 +1,11 @@
 import { BaseLanguageModel } from "langchain/base_language";
 import { BaseChain } from "langchain/chains";
 import { Tool } from "langchain/tools";
+import { Schema } from "jtd";
 import { AppState, BaseAppEvent, BaseSessionEvent, SessionState } from "./app.d.ts";
 import { ChainID, ModelID, ToolID } from "./types.d.ts";
 import { EventMiddleware, StateReducer } from "./state.d.ts";
+import { init } from "https://deno.land/x/base64@v0.2.1/base.ts";
 
 export interface PluginMetadata {
   schema_version: string;
@@ -31,17 +33,31 @@ export interface PluginProvisions {
 }
 
 export interface FeatureProvisions {
-  chain: FeatureProvision<BaseChain>;
-  model: FeatureProvision<BaseLanguageModel>;
-  tool: FeatureProvision<Tool>;
+  chain: FeatureProvision<ChainFeatureDescriptor<BaseChain>>;
+  model: FeatureProvision<FeatureDescriptor<BaseLanguageModel>>;
+  tool: FeatureProvision<FeatureDescriptor<Tool>>;
 }
 
 export interface FeatureProvision<T> {
-  (id: string, thing: FeatureCtor<T>): FeatureProvisions;
+  (id: string, thing: T): FeatureProvisions;
 }
 
-export interface FeatureCtor<T> {
-  (features: FeatureRegistry, session: SessionState): Promise<T> | T;
+export interface FeatureDescriptor<T> {
+  description: string;
+  init(features: FeatureRegistry, session: SessionState): Promise<T> | T;
+}
+
+export interface ChainFeatureDescriptor<T = BaseChain> extends FeatureDescriptor<T> {
+  config(featureIndexes: Record<keyof FeatureRegistry, string[]>): Promise<Schema> | Schema;
+}
+
+export interface BoundFeatureDescriptor<T> extends FeatureDescriptor<T> {
+  init(): Promise<T>;
+}
+
+export interface BoundChainFeatureDescriptor<T = BaseChain> extends ChainFeatureDescriptor<T> {
+  config(): Promise<Schema>;
+  init(): Promise<T>;
 }
 
 export interface RuntimeProvision<State, Event> {
@@ -62,7 +78,7 @@ export interface RegistryNamespace<K extends string, T> {
 }
 
 export interface FeatureRegistry {
-  chains: RegistryNamespace<ChainID, () => Promise<BaseChain>>;
-  models: RegistryNamespace<ModelID, () => Promise<BaseLanguageModel>>;
-  tools: RegistryNamespace<ToolID, () => Promise<Tool>>;
+  chains: RegistryNamespace<ChainID, BoundChainFeatureDescriptor>;
+  models: RegistryNamespace<ModelID, BoundFeatureDescriptor<BaseLanguageModel>>;
+  tools: RegistryNamespace<ToolID, BoundFeatureDescriptor<Tool>>;
 }

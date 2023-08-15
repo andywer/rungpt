@@ -3,6 +3,7 @@
     "debug/": "https://deno.land/x/debug@0.2.0/",
     "event/": "https://deno.land/x/event@2.0.1/",
     "langchain/": "https://esm.sh/v126/*langchain@0.0.95/",
+    "jtd": "https://esm.sh/v126/*jtd@0.1.1/",
     "oak/": "https://deno.land/x/oak@v12.1.0/",
     "std/": "https://deno.land/std@0.184.0/",
     "zod": "https://deno.land/x/zod@v3.21.4/mod.ts"

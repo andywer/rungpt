@@ -9,8 +9,8 @@ export default class DockerPlugin implements Plugin {
   ) {}
 
   init (provide: PluginProvisions) {
-    provide.features.tool("docker_read_file", () => new FileReaderTool());
-    provide.features.tool("docker_shell", () => new ShellTool());
-    provide.features.tool("docker_write_file", () => new FileWriterTool());
+    provide.features.tool("docker_read_file", FileReaderTool);
+    provide.features.tool("docker_shell", ShellTool);
+    provide.features.tool("docker_write_file", FileWriterTool);
   }
 }

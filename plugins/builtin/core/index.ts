@@ -1,5 +1,5 @@
 import { Plugin, PluginMetadata, PluginProvisions } from "../../../types/plugins.d.ts";
-import { createChatChain } from "./chains/index.ts";
+import { ChatChain } from "./chains/index.ts";
 import models from "./models/index.ts";
 
 export default class DockerPlugin implements Plugin {
@@ -8,7 +8,7 @@ export default class DockerPlugin implements Plugin {
   ) {}
 
   init (provide: PluginProvisions) {
-    provide.features.chain("chat", createChatChain);
+    provide.features.chain("chat", ChatChain);
 
     for (const [id, model] of Object.entries(models)) {
       provide.features.model(id, model);

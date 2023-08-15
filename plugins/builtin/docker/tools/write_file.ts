@@ -1,3 +1,4 @@
+import { FeatureDescriptor } from "../../../../types/plugins.d.ts";
 import { ActionContainer, getContainer } from "../lib/docker_manager.ts";
 import { DockerTool } from "../lib/tool.ts";
 
@@ -22,4 +23,9 @@ class FileWriterTool extends DockerTool {
   }
 }
 
-export default FileWriterTool;
+const descriptor: FeatureDescriptor<DockerTool> = {
+  description: "Write files in docker container",
+  init: () => new FileWriterTool(),
+};
+
+export default descriptor;

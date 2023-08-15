@@ -8,6 +8,7 @@ import { installPlugin } from "./lib/plugins.ts";
 import { loadRuntime } from "./lib/runtime.ts";
 import { ChatRole } from "./types/chat.d.ts";
 import { ISODateTimeString, SessionID } from "./types/types.d.ts";
+import { ChainFeatureDescriptor, FeatureDescriptor } from "./types/plugins.d.ts";
 
 const appUrl = new URL(import.meta.url);
 const appPath = await Deno.realPath(new URL(".", appUrl).pathname);
@@ -81,11 +82,18 @@ const app = new Application();
 const router = new Router();
 
 router.get("/api/app", (ctx) => {
+  const serialize = <T>([id, descriptor]: [string, FeatureDescriptor<T> | ChainFeatureDescriptor<T>]): [string, unknown] => {
+    return [id, {
+      config: "config" in descriptor ? descriptor.config(runtime.features.keys()) : undefined,
+      description: descriptor.description,
+    }];
+  };
+
   ctx.response.body = {
     features: {
-      chains: Array.from(runtime.features.chains.keys()),
-      models: Array.from(runtime.features.models.keys()),
-      tools: Array.from(runtime.features.tools.keys()),
+      chains: Object.fromEntries(Array.from(runtime.features.chains.entries()).map(serialize)),
+      models: Object.fromEntries(Array.from(runtime.features.models.entries()).map(serialize)),
+      tools: Object.fromEntries(Array.from(runtime.features.tools.entries()).map(serialize)),
     },
     plugins: Object.fromEntries(
       runtime.plugins.map((plugin) => [plugin.metadata.name, plugin.metadata])
@@ -139,26 +147,19 @@ router.get("/api/session/:id/events", async (ctx) => {
 router.post("/api/session/:id", async (ctx) => {
   const body = await ctx.request.body({ type: "json" }).value;
 
-  const config = z.object({
+  const parsed = z.object({
     chain: z.string().brand("ChainID"),
-    model: z.string().brand("ModelID"),
-    tools: z.array(z.union([
-      z.string().brand("ToolID"),
-      z.literal("*"),
-    ])),
+    config: z.any(),
   }).parse(body);
 
-  if (!body.chain) {
+  if (!parsed.chain) {
     ctx.throw(400, "Missing body parameter: chain");
   }
-  if (!body.model) {
-    ctx.throw(400, "Missing body parameter: model");
-  }
-  if (!body.tools) {
-    ctx.throw(400, "Missing body parameter: tools");
+  if (!parsed.config) {
+    ctx.throw(400, "Missing body parameter: config");
   }
 
-  const session = await runtime.createSession(ctx.params.id as SessionID, config);
+  const session = await runtime.createSession(ctx.params.id as SessionID, parsed.chain, parsed.config);
   ctx.response.body = session.store.getState();
 });
 

@@ -1,3 +1,4 @@
+import { FeatureDescriptor } from "../../../../types/plugins.d.ts";
 import { ActionContainer, getContainer } from "../lib/docker_manager.ts";
 import { streamExecutedCommand } from "../lib/streams.ts";
 import { DockerTool } from "../lib/tool.ts";
@@ -28,4 +29,9 @@ class ShellTool extends DockerTool {
   }
 }
 
-export default ShellTool;
+const descriptor: FeatureDescriptor<DockerTool> = {
+  description: "Execute shell commands in docker container",
+  init: () => new ShellTool(),
+};
+
+export default descriptor;

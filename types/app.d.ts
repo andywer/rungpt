@@ -17,12 +17,10 @@ export interface AppState {
 }
 
 // Must be JSON-serializable!
-export interface SessionState {
-  readonly config: {
-    readonly chain: ChainID;
-    readonly model: ModelID;
-    readonly tools: (ToolID | "*")[];
-  };
+// deno-lint-ignore no-explicit-any
+export interface SessionState<Config = any> {
+  readonly chain: ChainID;
+  readonly config: Config;
   readonly createdAt: ISODateTimeString;
   readonly id: SessionID;
   messages: ChatMessage[];

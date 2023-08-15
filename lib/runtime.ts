@@ -1,7 +1,9 @@
 import { debug } from "debug/mod.ts";
+import * as JTD from "jtd";
 import { CallbackManager } from "langchain/callbacks";
 import { AgentFinish } from "langchain/schema";
-import { AppState, BaseAppEvent, BaseSessionEvent, BaseSessionStore, SessionID, SessionState } from "../types/app.d.ts";
+import { httpErrors } from "oak/mod.ts";
+import { AppState, BaseAppEvent, BaseSessionEvent, BaseSessionStore, ChainID, SessionID, SessionState } from "../types/app.d.ts";
 import { ChatMessage } from "../types/chat.d.ts";
 import { FeatureRegistry, Plugin, PluginClass } from "../types/plugins.d.ts";
 import { Runtime as RuntimeT, Session } from "../types/runtime.d.ts";
@@ -11,6 +13,7 @@ import { FeaturesProvided, InternalFeatureRegistry, PluginInitializer } from "./
 import { PluginLoader } from "./plugin_loader.ts";
 import { createStateStore } from "./state.ts";
 import { throttle } from "./utils.ts";
+import { fail } from "https://deno.land/std@0.184.0/testing/asserts.ts";
 
 enum ChatRole {
   Assistant = "assistant",
@@ -72,13 +75,13 @@ export class Runtime implements RuntimeT {
           await stack.next(event);
           await stack.dispatch({
             type: "chain/run",
-            payload: { chainId: session.config.chain, runId, prompt: event.payload.message.text },
+            payload: { chainId: session.chain, runId, prompt: event.payload.message.text },
           });
         } else if (event.type === "chain/run") {
           let lastAction: AgentFinish | undefined;
 
           const actions: ChatMessage["actions"] = [];
-          const chain = await getFeatures(store).chains.get(event.payload.chainId)();
+          const chain = await getFeatures(store).chains.get(event.payload.chainId).init();
           const createdAt = new Date().toISOString() as ISODateTimeString;
           const messageIndex = store.getState().messages.length;
           const message: ChatMessage["message"] = {
@@ -279,12 +282,23 @@ export class Runtime implements RuntimeT {
     return initialized;
   }
 
-  async createSession(id: SessionID, config: SessionState["config"]): Promise<Session<BaseSessionStore>> {
+  async createSession(id: SessionID, chainId: ChainID, config: SessionState["config"]): Promise<Session<BaseSessionStore>> {
     if (this.sessionStorage.get(id)) {
-      throw new Error(`Session ${id} already exists`);
+      throw new httpErrors.BadRequest(`Session ${id} already exists`);
+    }
+
+    const descriptor = this.features.chains.get(chainId) || fail(`Chain ${chainId} not found`);
+    const configErrors = JTD.validate(await descriptor.config(this.features.keys()), config);
+
+    if (configErrors.length > 0) {
+      const error = configErrors[0];
+      console.error(`Schema error:`, error);
+      console.error(`Supplied config:`, config);
+      throw new httpErrors.BadRequest(`Invalid session config: ${JSON.stringify(config, null, 2)}\nSchema path: "${error.schemaPath.join(".")}"\nInstance path: "${error.instancePath.join(".")}"`);
     }
 
     const state: SessionState = {
+      chain: chainId,
       config,
       createdAt: new Date().toISOString() as ISODateTimeString,
       id,
@@ -313,7 +327,7 @@ export class Runtime implements RuntimeT {
     }
 
     const features = this.features.public(() => currentState);
-    const chain = await (features.chains.get(currentState.config.chain))();
+    const chain = await (features.chains.get(currentState.chain)).init();
 
     const session: Session<BaseSessionStore> = {
       chain,

@@ -121,8 +121,10 @@ chatForm.addEventListener("submit", (event) => {
         },
         body: JSON.stringify({
           chain: "chat",
-          model: "chatgpt-3.5",
-          tools: ["*"],
+          config: {
+            model: "chatgpt-3.5",
+            tools: ["*"],
+          },
         }),
       });
 

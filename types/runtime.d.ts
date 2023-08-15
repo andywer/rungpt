@@ -1,5 +1,5 @@
 import { BaseChain } from "langchain/chains";
-import { AppState, BaseAppEvent, BaseSessionEvent, BaseSessionStore, SessionState } from "./app.d.ts";
+import { AppState, BaseAppEvent, BaseSessionEvent, BaseSessionStore, ChainID, SessionState } from "./app.d.ts";
 import { FeatureRegistry, PluginClass } from "./plugins.d.ts";
 import { StateStore } from "./state.d.ts";
 import { SessionID } from "./types.d.ts";
@@ -8,7 +8,7 @@ export interface Runtime {
   plugins: PluginClass[];
   store: StateStore<AppState, BaseAppEvent>;
   init(pluginsPaths: string[]): Promise<void>;
-  createSession(id: SessionID, config: SessionState["config"]): Promise<Session<BaseSessionStore>>;
+  createSession(id: SessionID, chainId: ChainID, config: SessionState["config"]): Promise<Session<BaseSessionStore>>;
   readSession(sessionId: SessionID): Promise<Session<BaseSessionStore> | null>;
   storeSession(session: Session<BaseSessionStore>): Promise<void>;
 }
